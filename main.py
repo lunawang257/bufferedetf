@@ -3,6 +3,7 @@ import csv
 max_drawdown = 0
 max_money = 0
 START_MONEY = 100000
+TAX_RATE = 0.5
 
 def read_data(filename):
     data = []
@@ -23,13 +24,14 @@ def read_data(filename):
     
     return data
 
-def op_one_year(money, data: dict, type):
+def calc_one_year(money, data: dict, type):
     global max_drawdown
     global max_money
 
     new_money = money
     new_money += new_money * data['pricegain']
-    new_money += new_money * data['yield']
+    dividend = new_money * data['yield']
+    new_money += dividend - dividend * TAX_RATE
 
     if new_money > max_money:
         max_money = new_money
@@ -40,18 +42,18 @@ def op_one_year(money, data: dict, type):
 
     return new_money
 
-def op_all_years(data):
+def calc_all_years(data):
     cur_money = START_MONEY
     for year_data in data:
-        cur_money = op_one_year(cur_money, year_data, None)
+        cur_money = calc_one_year(cur_money, year_data, None)
 
     return cur_money
 
 
 def main():
     data = read_data('sp500-annual-gain-yield-short.csv')
-    end_money = op_all_years(data)
-    print(f'Starting money: {START_MONEY}\nEnding money: {end_money}\nMax drawdown: {max_drawdown * 100}%')
+    end_money = calc_all_years(data)
+    print(f'Starting money: ${START_MONEY}\nEnding money: ${end_money:.2f}\nMax drawdown: {max_drawdown * 100:.3f}%')
 
 if __name__ == "__main__":
     main()
