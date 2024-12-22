@@ -53,7 +53,12 @@ def calc_all_years(data):
 def main():
     data = read_data('sp500-annual-gain-yield-short.csv')
     end_money = calc_all_years(data)
-    print(f'Starting money: ${START_MONEY}\nEnding money: ${end_money:.2f}\nMax drawdown: {max_drawdown * 100:.3f}%')
+
+    gain = end_money / START_MONEY - 1
+    annualized_gain = pow(gain, 1 / (len(data) - 1)) - 1
+    
+    print(f'Starting money: ${START_MONEY}\nEnding money: ${end_money:.2f}')
+    print(f'Max drawdown: {max_drawdown * 100:.3f}%\nAnnualized gain: {annualized_gain * 100:.3f}%')
 
 if __name__ == "__main__":
     main()
