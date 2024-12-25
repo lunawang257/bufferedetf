@@ -13,6 +13,15 @@ class all_years_info:
         self.gain_per = gain_per
         self.annualized = annualized
 
+    def __lt__(self, other):
+        return self.end_money < other.end_money
+    
+    def __eq__(self, other):
+        return self.end_money == other.end_money
+    
+    def __mt__(self, other):
+        return self.end_money > other.end_money
+
 def read_data(filename):
     data = []
 
@@ -32,7 +41,7 @@ def read_data(filename):
     
     return data
 
-def calc_shuffled(data, want=[25, 50, 75], sample=5):
+def calc_multiverse(data, want=[25, 50, 75], sample=5):
     end_moneys = []
     data = data.copy()
     for i in range(sample):
@@ -116,7 +125,9 @@ def main():
     calc_and_print(data, 1, 0.1064)
     calc_and_print(data, 0.09, 0.183)
 
-    print(calc_shuffled(data))
+    result = calc_multiverse(data)
+    for verse in result:
+        print(verse.annualized)
 
 if __name__ == "__main__":
     main()
