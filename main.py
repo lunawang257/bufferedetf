@@ -38,6 +38,7 @@ def calc_shuffled(data, want=[25, 50, 75], sample=5):
     for i in range(sample):
         random.shuffle(data)
         
+        # debugging
         for year in data:
             print(year['year'], end=' ')
         print()
@@ -81,6 +82,8 @@ def calc_one_year(old_money, data: dict, protection, cap):
 
     if drawdown > max_drawdown:
         max_drawdown = drawdown
+
+    return new_money
 
 # cap = -1 means no cap
 def calc_all_years(data, protection, cap):
