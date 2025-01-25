@@ -74,7 +74,7 @@ class Investment:
         for year_data in data:
             cur_money = self.calc_one_year(cur_money, year_data, protection, cap)
 
-        gain = cur_money / self.start_money - 1
+        gain = cur_money / self.start_money
         annualized_gain = pow(gain, 1 / (len(data) - 1)) - 1
 
         return AllYearsInfo(cur_money, self.max_drawdown, gain, annualized_gain)
@@ -152,12 +152,13 @@ def main():
     data = read_annual_data('sp500-annual-gain-yield-short.csv')
     calc_and_print(data, 0, -1)
     calc_and_print(data, 1, -1)
+    calc_and_print(data, 0, 0)
     calc_and_print(data, 1, 0.1064)
     calc_and_print(data, 0.09, 0.183)
 
-    result = calc_multiverse(data)
+    '''result = calc_multiverse(data)
     for verse in result:
-        print(verse.annualized)
+        print(verse.annualized)'''
 
 if __name__ == "__main__":
     main()
