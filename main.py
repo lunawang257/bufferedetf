@@ -118,6 +118,7 @@ def read_monthly_data(filename: str) -> list:
 def calc_multiverse(data: list, want: list = [25, 50, 75], sample_times: int = 5) -> list:
     end_moneys = []
     data = data.copy()
+    invest = Investment(START_MONEY, TAX_RATE)
     for i in range(sample_times):
         random.shuffle(data)
         
@@ -127,7 +128,7 @@ def calc_multiverse(data: list, want: list = [25, 50, 75], sample_times: int = 5
         print()
         print()'''
 
-        end_moneys.append(calc_all_years(data, 0, -1))
+        end_moneys.append(invest.calc_all_years(data, 0, -1))
 
     end_moneys.sort()
     out = []
@@ -153,12 +154,13 @@ def main():
     calc_and_print(data, 0, -1)
     calc_and_print(data, 1, -1)
     calc_and_print(data, 0, 0)
+    calc_and_print(data, 1, 0)
     calc_and_print(data, 1, 0.1064)
     calc_and_print(data, 0.09, 0.183)
 
-    '''result = calc_multiverse(data)
+    result = calc_multiverse(data)
     for verse in result:
-        print(verse.annualized)'''
+        print(verse.annualized)
 
 if __name__ == "__main__":
     main()
