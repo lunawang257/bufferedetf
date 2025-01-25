@@ -1,5 +1,6 @@
 import csv
 import random
+import datetime
 
 max_drawdown = 0
 max_money = 0
@@ -18,11 +19,8 @@ class all_years_info:
     
     def __eq__(self, other):
         return self.end_money == other.end_money
-    
-    def __mt__(self, other):
-        return self.end_money > other.end_money
 
-def read_data(filename):
+def read_annual_data(filename):
     data = []
 
     with open(filename, mode='r') as file:
@@ -41,17 +39,34 @@ def read_data(filename):
     
     return data
 
-def calc_multiverse(data, want=[25, 50, 75], sample=5):
+# date, adjusted close (adj_close)
+def read_monthly_data(filename):
+    data = []
+
+    with open(filename, mode='r') as file:
+        csvfile = csv.DictReader(file)
+
+        for line_dict in csvfile:
+            line_dict = dict(line_dict)
+
+            line_dict['date'] = datetime.strptime(line_dict['date'], "%Y-%m-%d")
+
+            if line_dict['date'].month == 1:
+                data.append( {'date': line_dict['date'], 'adj_close': float(line_dict['adj_close'])} )
+    
+    return data
+
+def calc_multiverse(data, want=[25, 50, 75], sample_times=5):
     end_moneys = []
     data = data.copy()
-    for i in range(sample):
+    for i in range(sample_times):
         random.shuffle(data)
         
         # debugging
-        for year in data:
+        '''for year in data:
             print(year['year'], end=' ')
         print()
-        print()
+        print()'''
 
         end_moneys.append(calc_all_years(data, 0, -1))
 
@@ -119,7 +134,7 @@ def calc_and_print(data, protection, cap):
     print(f'Max drawdown: {info.max_drawdown * 100:.3f}%\nAnnualized gain: {info.annualized * 100:.3f}%')
 
 def main():
-    data = read_data('sp500-annual-gain-yield-short.csv')
+    data = read_annual_data('sp500-annual-gain-yield-short.csv')
     calc_and_print(data, 0, -1)
     calc_and_print(data, 1, -1)
     calc_and_print(data, 1, 0.1064)
