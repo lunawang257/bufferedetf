@@ -140,14 +140,15 @@ def month_to_year_data(month_data: list) -> list:
     # Process data in chunks of 12 months
     for i in range(0, len(month_data) - 11, 12):  # Step by 12, ensure we have 12 months left
         year_chunk = month_data[i:i+12]
+
+        start_money = 1000
+        money = start_money
+        for month in year_chunk:
+            money *= month['gain']
         
-        # Calculate price gain for the year
-        start_price = year_chunk[0]['adj_close']
-        end_price = year_chunk[-1]['adj_close']
-        price_gain = (end_price - start_price) / start_price
+        price_gain = money / start_money
         
         yearly_data.append({
-            'year': year_chunk[0]['date'].year,
             'pricegain': price_gain,
             'yield': 0.0
         })
@@ -158,14 +159,9 @@ def calc_multiverse(month_data: list, want: list = [25, 50, 75], sample_times: i
     end_moneys = []
     month_data = month_data.copy() # copy to avoid modifying the original list
     invest = Investment(START_MONEY, TAX_RATE)
+
     for i in range(sample_times):
         random.shuffle(month_data)
-        
-        # debugging
-        '''for year in month_data:
-            print(year['year'], end=' ')
-        print()
-        print()'''
 
         end_moneys.append(invest.calc_all_years(month_data, 0, -1))
 
