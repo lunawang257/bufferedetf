@@ -100,35 +100,74 @@ def read_annual_data(filename: str) -> list:
 
 # date, adjusted close (adj_close)
 def read_monthly_data(filename: str) -> list:
+    """Read monthly data from CSV file.
+    
+    Args:
+        filename: Path to CSV file with date, open, adj_close columns
+        
+    Returns:
+        List of dictionaries with 'date' and 'gain' for all months
+    """
     data = []
 
     with open(filename, mode='r') as file:
         csvfile = csv.DictReader(file)
 
+        cur_money = 100
         for line_dict in csvfile:
             line_dict = dict(line_dict)
-
-            line_dict['date'] = datetime.strptime(line_dict['date'], '%Y-%m-%d')
-
-            if line_dict['date'].month == 1:
-                data.append( {'date': line_dict['date'], 'adj_close': float(line_dict['adj_close'])} )
+            date = datetime.strptime(line_dict['date'], '%Y-%m-%d')
+            if date.day == 1: # only keep the first day of each month
+                gain = float(line_dict['adj_close']) / float(line_dict['open'])
+                data.append({
+                    'date': datetime.strptime(line_dict['date'], '%Y-%m-%d'),
+                    'gain': gain
+                })
     
     return data
 
-def calc_multiverse(data: list, want: list = [25, 50, 75], sample_times: int = 5) -> list:
+def month_to_year_data(month_data: list) -> list:
+    """Convert monthly data to yearly data format by calculating yearly gains from 12-month periods.
+    
+    Args:
+        month_data: List of dictionaries with 'date' and 'gain' keys
+        
+    Returns:
+        List of dictionaries with 'pricegain' and 'yield' keys
+    """
+    yearly_data = []
+    
+    # Process data in chunks of 12 months
+    for i in range(0, len(month_data) - 11, 12):  # Step by 12, ensure we have 12 months left
+        year_chunk = month_data[i:i+12]
+        
+        # Calculate price gain for the year
+        start_price = year_chunk[0]['adj_close']
+        end_price = year_chunk[-1]['adj_close']
+        price_gain = (end_price - start_price) / start_price
+        
+        yearly_data.append({
+            'year': year_chunk[0]['date'].year,
+            'pricegain': price_gain,
+            'yield': 0.0
+        })
+    
+    return yearly_data
+
+def calc_multiverse(month_data: list, want: list = [25, 50, 75], sample_times: int = 5) -> list:
     end_moneys = []
-    data = data.copy()
+    month_data = month_data.copy() # copy to avoid modifying the original list
     invest = Investment(START_MONEY, TAX_RATE)
     for i in range(sample_times):
-        random.shuffle(data)
+        random.shuffle(month_data)
         
         # debugging
-        '''for year in data:
+        '''for year in month_data:
             print(year['year'], end=' ')
         print()
         print()'''
 
-        end_moneys.append(invest.calc_all_years(data, 0, -1))
+        end_moneys.append(invest.calc_all_years(month_data, 0, -1))
 
     end_moneys.sort()
     out = []
@@ -158,7 +197,9 @@ def main():
     calc_and_print(data, 1, 0.1064)
     calc_and_print(data, 0.09, 0.183)
 
-    result = calc_multiverse(data)
+    month_data = read_monthly_data('sp500-monthly-gain-yield-short.csv')
+    yearly_data = month_to_year_data(month_data)
+    result = calc_multiverse(yearly_data)
     for verse in result:
         print(verse.annualized)
 
