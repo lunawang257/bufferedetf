@@ -87,14 +87,10 @@ def read_annual_data(filename: str) -> list:
 
         for line_dict in csvfile:
             line_dict = dict(line_dict)
-
-            for key, value in line_dict.items():
-                if key == 'year':
-                    line_dict[key] = int(value)
-                else:
-                    line_dict[key] = float(value)
-
-            data.append(line_dict)
+            data.append({
+                'pricegain': float(line_dict['pricegain']),
+                'yield': float(line_dict['yield'])
+            })
     
     return data
 
@@ -114,10 +110,14 @@ def read_monthly_data(filename: str) -> list:
         csvfile = csv.DictReader(file)
 
         prev_adj_close = None
+        prev_month = None
         for line_dict in csvfile:
             line_dict = dict(line_dict)
             date = datetime.strptime(line_dict['date'], '%Y-%m-%d')
-            if date.day == 1: # only keep the first day of each month
+            if prev_month is None:
+                prev_month = date.month
+            elif date.month != prev_month:
+                # only keep the first day of each month
                 cur_adj_close = float(line_dict['adj_close'])
                 if prev_adj_close is not None:
                     gain = cur_adj_close / prev_adj_close
@@ -126,6 +126,7 @@ def read_monthly_data(filename: str) -> list:
                         'gain': gain
                     })
                 prev_adj_close = cur_adj_close
+                prev_month = date.month
     
     return data
 
@@ -197,10 +198,16 @@ def main():
     calc_and_print(data, 1, 0.1064)
     calc_and_print(data, 0.09, 0.183)
 
-    month_data = read_monthly_data('sp500-short.csv')
+    data_file = 'sp500-short.csv'
+    data_file = 'sp500-short-mini.csv' # 3 year data for testing
+    month_data = read_monthly_data(data_file)
     result = calc_multiverse(month_data)
     for verse in result:
         print(verse.annualized, verse.max_drawdown)
+
+    data2 = read_monthly_data(data_file)
+    data2 = month_to_year_data(data2)
+    calc_and_print(data2, 0, -1)
 
 if __name__ == "__main__":
     main()
