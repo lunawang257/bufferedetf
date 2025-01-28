@@ -113,21 +113,25 @@ def read_monthly_data(filename: str) -> list:
     with open(filename, mode='r') as file:
         csvfile = csv.DictReader(file)
 
-        cur_money = 100
+        prev_adj_close = None
         for line_dict in csvfile:
             line_dict = dict(line_dict)
             date = datetime.strptime(line_dict['date'], '%Y-%m-%d')
             if date.day == 1: # only keep the first day of each month
-                gain = float(line_dict['adj_close']) / float(line_dict['open'])
-                data.append({
-                    'date': datetime.strptime(line_dict['date'], '%Y-%m-%d'),
-                    'gain': gain
-                })
+                cur_adj_close = float(line_dict['adj_close'])
+                if prev_adj_close is not None:
+                    gain = cur_adj_close / prev_adj_close
+                    data.append({
+                        'date': date,
+                        'gain': gain
+                    })
+                prev_adj_close = cur_adj_close
     
     return data
 
 def month_to_year_data(month_data: list) -> list:
     """Convert monthly data to yearly data format by calculating yearly gains from 12-month periods.
+    Doesn't alter the original list.
     
     Args:
         month_data: List of dictionaries with 'date' and 'gain' keys
@@ -162,8 +166,8 @@ def calc_multiverse(month_data: list, want: list = [25, 50, 75], sample_times: i
 
     for i in range(sample_times):
         random.shuffle(month_data)
-
-        end_moneys.append(invest.calc_all_years(month_data, 0, -1))
+        year_data = month_to_year_data(month_data)
+        end_moneys.append(invest.calc_all_years(year_data, 0, -1))
 
     end_moneys.sort()
     out = []
@@ -193,11 +197,10 @@ def main():
     calc_and_print(data, 1, 0.1064)
     calc_and_print(data, 0.09, 0.183)
 
-    month_data = read_monthly_data('sp500-monthly-gain-yield-short.csv')
-    yearly_data = month_to_year_data(month_data)
-    result = calc_multiverse(yearly_data)
+    month_data = read_monthly_data('sp500-short.csv')
+    result = calc_multiverse(month_data)
     for verse in result:
-        print(verse.annualized)
+        print(verse.annualized, verse.max_drawdown)
 
 if __name__ == "__main__":
     main()
