@@ -43,7 +43,7 @@ class Investment:
             float: New amount of money after calculations
         """
         buyhold_mon = old_money
-        buyhold_mon += buyhold_mon * data['pricegain']
+        buyhold_mon *= data['pricegain']
         dividend = buyhold_mon * data['yield']
         buyhold_mon += dividend - dividend * self.tax_rate
         
@@ -88,7 +88,7 @@ def read_annual_data(filename: str) -> list:
         for line_dict in csvfile:
             line_dict = dict(line_dict)
             data.append({
-                'pricegain': float(line_dict['pricegain']),
+                'pricegain': float(line_dict['pricegain']) + 1,
                 'yield': float(line_dict['yield'])
             })
     
@@ -119,12 +119,14 @@ def read_monthly_data(filename: str) -> list:
             elif date.month != prev_month:
                 # only keep the first day of each month
                 cur_adj_close = float(line_dict['adj_close'])
-                if prev_adj_close is not None:
+                if prev_adj_close is None:
+                    gain = 1 # first month has special value 1 means no change
+                else:
                     gain = cur_adj_close / prev_adj_close
-                    data.append({
-                        'date': date,
-                        'gain': gain
-                    })
+                data.append({
+                    'date': date,
+                    'gain': gain
+                })
                 prev_adj_close = cur_adj_close
                 prev_month = date.month
     
@@ -179,7 +181,7 @@ def calc_multiverse(month_data: list, want: list = [25, 50, 75], sample_times: i
     
     return out
 
-def calc_and_print(data, protection, cap):
+def calc_and_print(data: list, protection: float, cap: float):
     print_cap = 'no' if cap == -1 else f'{cap * 100:.3f}%'
     print(f'\n*** Results for {protection * 100:.3f}% protection, {print_cap} cap ***')
 
@@ -200,6 +202,7 @@ def main():
 
     data_file = 'sp500-short.csv'
     data_file = 'sp500-short-mini.csv' # 3 year data for testing
+
     month_data = read_monthly_data(data_file)
     result = calc_multiverse(month_data)
     for verse in result:
@@ -208,6 +211,10 @@ def main():
     data2 = read_monthly_data(data_file)
     data2 = month_to_year_data(data2)
     calc_and_print(data2, 0, -1)
+    data3 = read_annual_data('sp500-annual-mini.csv')
+    calc_and_print(data3, 0, -1)
+
+
 
 if __name__ == "__main__":
     main()
