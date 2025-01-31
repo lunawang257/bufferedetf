@@ -1,6 +1,7 @@
 import csv
 import random
 from datetime import datetime
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # Constants
 START_MONEY = 1
@@ -162,15 +163,21 @@ def month_to_year_data(month_data: list) -> list:
     
     return yearly_data
 
-def calc_multiverse(month_data: list, want: list = [25, 50, 75], sample_times: int = 5) -> list:
-    end_moneys = []
-    month_data = month_data.copy() # copy to avoid modifying the original list
+def calc_multiverse_sample(month_data: list, protection: float, cap: float) -> AllYearsInfo:
+    """Helper function to calculate a single sample for calc_multiverse."""
+    random.shuffle(month_data)
+    year_data = month_to_year_data(month_data)
     invest = Investment(START_MONEY, TAX_RATE)
+    return invest.calc_all_years(year_data, protection, cap)
 
-    for i in range(sample_times):
-        random.shuffle(month_data)
-        year_data = month_to_year_data(month_data)
-        end_moneys.append(invest.calc_all_years(year_data, 0, -1))
+def calc_multiverse(month_data: list, sample_times: int = 5, want: list = [25, 50, 75]) -> list:
+    end_moneys = []
+    month_data = month_data.copy()  # copy to avoid modifying the original list
+
+    with ProcessPoolExecutor() as executor:
+        futures = [executor.submit(calc_multiverse_sample, month_data, 0, -1) for _ in range(sample_times)]
+        for future in as_completed(futures):
+            end_moneys.append(future.result())
 
     end_moneys.sort()
     out = []
