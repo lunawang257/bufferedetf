@@ -25,7 +25,7 @@ class AllYearsInfo:
 
 class Investment:
     """Class to store and calculate investment results."""
-    def __init__(self, start_money: float = 1, tax_rate: float = 0.5):
+    def __init__(self, start_money: float = 1, tax_rate: float = TAX_RATE):
         self.start_money = start_money
         self.tax_rate = tax_rate
         self.max_drawdown = 0
@@ -112,25 +112,33 @@ def read_monthly_data(filename: str) -> list:
 
         prev_adj_close = None
         prev_month = None
+        last_day_adj_close = None
         for line_dict in csvfile:
             line_dict = dict(line_dict)
+            cur_adj_close = float(line_dict['adj_close'])
             date = datetime.strptime(line_dict['date'], '%Y-%m-%d')
             if prev_month is None:
                 prev_month = date.month
             elif date.month != prev_month:
-                # only keep the first day of each month
-                cur_adj_close = float(line_dict['adj_close'])
-                if prev_adj_close is None:
-                    gain = 1 # first month has special value 1 means no change
-                else:
-                    gain = cur_adj_close / prev_adj_close
-                data.append({
-                    'date': date,
-                    'gain': gain
-                })
-                prev_adj_close = cur_adj_close
+                # only keep the last day of each month
+                if prev_adj_close is not None:
+                    gain = last_day_adj_close / prev_adj_close
+                    data.append({
+                        'date': date,
+                        'gain': gain
+                    })
+                prev_adj_close = last_day_adj_close
                 prev_month = date.month
-    
+            last_day_adj_close = cur_adj_close  # Update to the last day of the month
+
+        # Add the last month
+        if last_day_adj_close is not None and prev_adj_close is not None:
+            gain = last_day_adj_close / prev_adj_close
+            data.append({
+                'date': date,
+                'gain': gain
+            })
+
     return data
 
 def month_to_year_data(month_data: list) -> list:
@@ -170,12 +178,12 @@ def calc_multiverse_sample(month_data: list, protection: float, cap: float) -> A
     invest = Investment(START_MONEY, TAX_RATE)
     return invest.calc_all_years(year_data, protection, cap)
 
-def calc_multiverse(month_data: list, sample_times: int = 5, want: list = [25, 50, 75]) -> list:
+def calc_multiverse(month_data: list, protection: float, cap: float, sample_times: int = 5, want: list = DEFAULT_PERCENTILES) -> list:
     end_moneys = []
     month_data = month_data.copy()  # copy to avoid modifying the original list
 
     with ProcessPoolExecutor() as executor:
-        futures = [executor.submit(calc_multiverse_sample, month_data, 0, -1) for _ in range(sample_times)]
+        futures = [executor.submit(calc_multiverse_sample, month_data, protection, cap) for _ in range(sample_times)]
         for future in as_completed(futures):
             end_moneys.append(future.result())
 
@@ -198,30 +206,66 @@ def calc_and_print(data: list, protection: float, cap: float):
     #print(f'Starting money: ${START_MONEY}\nEnding money: ${end_money:.2f}')
     print(f'Max drawdown: {info.max_drawdown * 100:.3f}%\nAnnualized gain: {info.annualized * 100:.3f}%')
 
+def adjust_monthly_gain_with_yield(data_no_div: list, data_with_div: list) -> list:
+    """Adjust the monthly gain in data_no_div with the yield in data_with_div.
+    
+    Args:
+        data_no_div: List of dictionaries with 'date' and 'gain' keys (monthly data)
+        data_with_div: List of dictionaries with 'pricegain' and 'yield' keys (annual data)
+        
+    Returns:
+        List of dictionaries with adjusted 'gain' values
+    """
+    adjusted_data = data_no_div.copy()
+    year_index = 0
+
+    for i in range(len(adjusted_data)):
+        month = adjusted_data[i]['date'].month
+        year = adjusted_data[i]['date'].year
+
+        if year_index < len(data_with_div) and year == adjusted_data[i]['date'].year:
+            annual_gain = data_with_div[year_index]['pricegain']
+            annual_yield = data_with_div[year_index]['yield']
+            annual_yield_ratio = (annual_gain + annual_yield) / annual_gain
+            monthly_yield = annual_yield_ratio ** (1 / 12)
+            adjusted_data[i]['gain'] *= monthly_yield
+        
+        if month == 12:  # Move to the next year after December
+            year_index += 1
+
+    return adjusted_data
+
+def print_price_gain_with_yield(data):
+    for i in range(len(data)):
+        gain = data[i]['pricegain']
+        yield_ = data[i]['yield']
+        print(f'{i}: {gain} {yield_} {gain + yield_}')
+
 def main():
-    data = read_annual_data('sp500-annual-gain-yield-short.csv')
-    calc_and_print(data, 0, -1)
-    calc_and_print(data, 1, -1)
+    annual_data = read_annual_data('sp500-annual-gain-yield-short.csv')
+    calc_and_print(annual_data, 0, -1)
+    '''calc_and_print(data, 1, -1)
     calc_and_print(data, 0, 0)
     calc_and_print(data, 1, 0)
     calc_and_print(data, 1, 0.1064)
-    calc_and_print(data, 0.09, 0.183)
+    calc_and_print(data, 0.09, 0.183)'''
 
-    data_file = 'sp500-short.csv'
-    data_file = 'sp500-short-mini.csv' # 3 year data for testing
+    daily_file = 'sp500-short.csv'
+    daily_file = 'sp500-short-mini.csv' # 3 year data for testing
 
-    month_data = read_monthly_data(data_file)
-    result = calc_multiverse(month_data)
+    month_data = read_monthly_data(daily_file)
+    '''result = calc_multiverse(month_data, 0, -1)
+    print('\n*** Multiverse results for no protection, no cap ***')
     for verse in result:
-        print(verse.annualized, verse.max_drawdown)
+        print(verse.annualized, verse.max_drawdown)'''
 
-    data2 = read_monthly_data(data_file)
-    data2 = month_to_year_data(data2)
-    calc_and_print(data2, 0, -1)
-    data3 = read_annual_data('sp500-annual-mini.csv')
-    calc_and_print(data3, 0, -1)
-
-
+    yield_month = adjust_monthly_gain_with_yield(month_data, annual_data)
+    yield_month_to_year = month_to_year_data(yield_month)
+    print_price_gain_with_yield(yield_month_to_year)
+    calc_and_print(yield_month_to_year, 0, -1)
+    annual_data = read_annual_data('sp500-annual-mini.csv') # with yield
+    print_price_gain_with_yield(annual_data)
+    calc_and_print(annual_data, 0, -1)
 
 if __name__ == "__main__":
     main()
