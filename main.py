@@ -112,7 +112,8 @@ def read_monthly_data(filename: str) -> list:
 
         prev_adj_close = None
         prev_month = None
-        last_day_adj_close = None
+        last_day = None # Last day of the last month
+        last_day_adj_close = None # price on 'last_day'
         for line_dict in csvfile:
             line_dict = dict(line_dict)
             cur_adj_close = float(line_dict['adj_close'])
@@ -124,12 +125,13 @@ def read_monthly_data(filename: str) -> list:
                 if prev_adj_close is not None:
                     gain = last_day_adj_close / prev_adj_close
                     data.append({
-                        'date': date,
+                        'date': last_day,
                         'gain': gain
                     })
                 prev_adj_close = last_day_adj_close
                 prev_month = date.month
             last_day_adj_close = cur_adj_close  # Update to the last day of the month
+            last_day = date
 
         # Add the last month
         if last_day_adj_close is not None and prev_adj_close is not None:
