@@ -250,8 +250,8 @@ def main():
     calc_and_print(data, 1, 0.1064)
     calc_and_print(data, 0.09, 0.183)'''
 
-    daily_file = 'sp500-short.csv'
-    daily_file = 'sp500-short-mini.csv' # 3 year data for testing
+    daily_file = 'sp500-daily.csv'
+    daily_file = 'sp500-daily-mini.csv' # 3 year data for testing
 
     month_data = read_monthly_data(daily_file)
     '''result = calc_multiverse(month_data, 0, -1)
