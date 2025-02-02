@@ -44,9 +44,7 @@ class Investment:
             float: New amount of money after calculations
         """
         buyhold_mon = old_money
-        buyhold_mon *= data['pricegain']
-        dividend = buyhold_mon * data['yield']
-        buyhold_mon += dividend - dividend * self.tax_rate
+        buyhold_mon *= data['pricegain'] + data['yield'] * (1 - self.tax_rate)
         
         if buyhold_mon < old_money:
             lost = 1 - buyhold_mon / old_money
