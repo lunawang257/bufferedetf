@@ -5,7 +5,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # Constants
 START_MONEY = 1
-TAX_RATE = 0.5
+TAX_RATE = 0.371
 DEFAULT_PERCENTILES = [25, 50, 75]
 DEFAULT_SAMPLE_TIMES = 5
 
@@ -198,17 +198,17 @@ def calc_multiverse(month_data: list, protection: float, cap: float, sample_time
     
     return out
 
-def calc_and_print(data: list, protection: float, cap: float):
+def calc_and_print(data: list, protection: float, cap: float, tax_rate: float = TAX_RATE):
     print_cap = 'no' if cap == -1 else f'{cap * 100:.3f}%'
     print(f'\n*** Results for {protection * 100:.3f}% protection, {print_cap} cap ***')
 
-    investment = Investment(START_MONEY, TAX_RATE)
+    investment = Investment(START_MONEY, tax_rate)
     info = investment.calc_all_years(data, protection, cap)
     
     #print(f'Starting money: ${START_MONEY}\nEnding money: ${end_money:.2f}')
     print(f'Max drawdown: {info.max_drawdown * 100:.3f}%\nAnnualized gain: {info.annualized * 100:.3f}%')
 
-def adjust_monthly_gain_with_yield(data_no_div: list, data_with_div: list) -> list:
+def adjust_monthly_gain_with_yield(data_no_div: list, data_with_div: list, tax_rate: float) -> list:
     """Adjust the monthly gain in data_no_div with the yield in data_with_div.
     
     Args:
@@ -228,7 +228,8 @@ def adjust_monthly_gain_with_yield(data_no_div: list, data_with_div: list) -> li
         if year_index < len(data_with_div) and year == adjusted_data[i]['date'].year:
             annual_gain = data_with_div[year_index]['pricegain']
             annual_yield = data_with_div[year_index]['yield']
-            annual_yield_ratio = (annual_gain + annual_yield) / annual_gain
+
+            annual_yield_ratio = (annual_gain + annual_yield * (1 - tax_rate)) / annual_gain
             monthly_yield = annual_yield_ratio ** (1 / 12)
             adjusted_data[i]['gain'] *= monthly_yield
         
@@ -241,12 +242,12 @@ def print_price_gain_with_yield(data):
     for i in range(len(data)):
         gain = data[i]['pricegain']
         yield_ = data[i]['yield']
-        print(f'{i}: {gain} {yield_} {gain + yield_}')
+        print(f'{i}: {gain} {yield_} {gain + yield_ * (1 - TAX_RATE)}')
 
 def main():
     annual_data = read_annual_data('sp500-annual-gain-yield-short.csv')
-    calc_and_print(annual_data, 0, -1)
     '''calc_and_print(data, 1, -1)
+    calc_and_print(annual_data, 0, -1)
     calc_and_print(data, 0, 0)
     calc_and_print(data, 1, 0)
     calc_and_print(data, 1, 0.1064)
@@ -261,12 +262,17 @@ def main():
     for verse in result:
         print(verse.annualized, verse.max_drawdown)'''
 
-    yield_month = adjust_monthly_gain_with_yield(month_data, annual_data)
+    yield_month = adjust_monthly_gain_with_yield(month_data, annual_data, TAX_RATE)
     yield_month_to_year = month_to_year_data(yield_month)
-    print_price_gain_with_yield(yield_month_to_year)
-    calc_and_print(yield_month_to_year, 0, -1)
     annual_data = read_annual_data('sp500-annual-mini.csv') # with yield
+
+    print('\nCompare raw data')
+    print('From monthly data (yield combined)')
+    print_price_gain_with_yield(yield_month_to_year)
+    print('\nFrom annual data')
     print_price_gain_with_yield(annual_data)
+
+    calc_and_print(yield_month_to_year, 0, -1, tax_rate=0)
     calc_and_print(annual_data, 0, -1)
 
 if __name__ == "__main__":
