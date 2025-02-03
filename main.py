@@ -2,6 +2,7 @@ import csv
 import random
 from datetime import datetime
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import time  # Import the time module
 
 # Constants
 START_MONEY = 1
@@ -248,9 +249,26 @@ def main():
 
     month_data = read_monthly_data(daily_file)
     month_with_yield = adjust_monthly_gain_with_yield(month_data, annual_data, TAX_RATE)
+
+    samples = 10000
+    #protection, cap = (1, 0.1064)
+    #protection, cap = (0.09, 0.183)
+    protection, cap = (0, -1)
+
+
+    calc_and_print(annual_data, protection, cap) # our universe
+
     percentiles = [5, 25, 50, 75, 95]
-    result = calc_multiverse(month_with_yield, 0, -1, sample_times=1000, want=percentiles)
-    print(f'\n*** Multiverse results for no protection, no cap, {len(month_data)} months data ***')
+
+    # Measure execution time of the following line
+    start_time = time.time()
+    result = calc_multiverse(month_with_yield, protection, cap,
+                             sample_times=samples, want=percentiles)
+    end_time = time.time()
+    execution_time = end_time - start_time
+    print(f'\nExecution time: {execution_time:.2f} seconds for {samples} multiverse')
+
+    print(f'\nprotection={protection}, cap={cap}, {len(month_data)} months data ***')
     print('Perctl\tGain\tDrawdown')
     for i, verse in enumerate(result):
         gain = verse.annualized * 100

@@ -30,7 +30,7 @@ def test_adjust_yield():
     for i in range(len(yield_month_to_year)):
         gain1 = yield_month_to_year[i]['pricegain']
         gain2 = annual_data[i]['pricegain'] + annual_data[i]['yield']
-        assert gain1 - gain2 < 0.0001
+        assert gain1 - gain2 < 0.000001
 
 if __name__ == "__main__":
     pytest.main()
