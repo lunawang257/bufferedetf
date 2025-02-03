@@ -249,10 +249,13 @@ def main():
     month_data = read_monthly_data(daily_file)
     month_with_yield = adjust_monthly_gain_with_yield(month_data, annual_data, TAX_RATE)
     percentiles = [5, 25, 50, 75, 95]
-    result = calc_multiverse(month_with_yield, 0, -1, sample_times=100, want=percentiles)
-    print('\n*** Multiverse results for no protection, no cap ***')
+    result = calc_multiverse(month_with_yield, 0, -1, sample_times=1000, want=percentiles)
+    print(f'\n*** Multiverse results for no protection, no cap, {len(month_data)} months data ***')
+    print('Perctl\tGain\tDrawdown')
     for i, verse in enumerate(result):
-        print(f'{percentiles[i]}th percentile: Annualized gain: {verse.annualized}, Max drawdown: {verse.max_drawdown}')
+        gain = verse.annualized * 100
+        drawdown = verse.max_drawdown * 100
+        print(f'{percentiles[i]}\t{gain:.2f}%\t{drawdown:.2f}%')
 
 if __name__ == "__main__":
     main()
