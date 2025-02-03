@@ -244,34 +244,15 @@ def print_price_gain_with_yield(data):
 
 def main():
     annual_data = read_annual_data('sp500-annual-gain-yield-short.csv')
-    '''calc_and_print(data, 1, -1)
-    calc_and_print(annual_data, 0, -1)
-    calc_and_print(data, 0, 0)
-    calc_and_print(data, 1, 0)
-    calc_and_print(data, 1, 0.1064)
-    calc_and_print(data, 0.09, 0.183)'''
-
     daily_file = 'sp500-daily.csv'
-    daily_file = 'sp500-daily-mini.csv' # 3 year data for testing
 
     month_data = read_monthly_data(daily_file)
-    '''result = calc_multiverse(month_data, 0, -1)
+    month_with_yield = adjust_monthly_gain_with_yield(month_data, annual_data, TAX_RATE)
+    percentiles = [5, 25, 50, 75, 95]
+    result = calc_multiverse(month_with_yield, 0, -1, sample_times=100, want=percentiles)
     print('\n*** Multiverse results for no protection, no cap ***')
-    for verse in result:
-        print(verse.annualized, verse.max_drawdown)'''
-
-    yield_month = adjust_monthly_gain_with_yield(month_data, annual_data, TAX_RATE)
-    yield_month_to_year = month_to_year_data(yield_month)
-    annual_data = read_annual_data('sp500-annual-mini.csv') # with yield
-
-    print('\nCompare raw data')
-    print('From monthly data (yield combined)')
-    print_price_gain_with_yield(yield_month_to_year)
-    print('\nFrom annual data')
-    print_price_gain_with_yield(annual_data)
-
-    calc_and_print(yield_month_to_year, 0, -1, tax_rate=0)
-    calc_and_print(annual_data, 0, -1)
+    for i, verse in enumerate(result):
+        print(f'{percentiles[i]}th percentile: Annualized gain: {verse.annualized}, Max drawdown: {verse.max_drawdown}')
 
 if __name__ == "__main__":
     main()
