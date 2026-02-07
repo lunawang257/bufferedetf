@@ -59,13 +59,49 @@ class Investment:
 
         if new_money > self.max_money:
             self.max_money = new_money
+            
         drawdown = 1 - new_money / self.max_money
-
         if drawdown > self.max_drawdown:
             self.max_drawdown = drawdown
 
         return new_money
     
+    def calc_one_year_partial_gain(self, old_money: float, data: dict, loss_threshold: float, gain_fraction: float) -> float:
+        """Calculate investment results for one year with complete loss protection after threshold and partial gains.
+    
+        Args:
+            old_money: Starting amount of money
+            data: Dictionary containing price gain and yield data
+            loss_threshold: Complete loss protection threshold (e.g., 0.15 means losses capped at 15%)
+            gain_fraction: Fraction of buy-and-hold gains captured (e.g., 0.5 means 50% of gains)
+        
+        Returns:
+            float: New amount of money after calculations
+        """
+        buyhold_mon = old_money
+        buyhold_mon *= data['pricegain'] + data['yield'] * (1 - self.tax_rate)
+        
+        if buyhold_mon < old_money:
+            # Loss scenario: complete protection after loss_threshold
+            lost = 1 - buyhold_mon / old_money
+            # If loss exceeds threshold, cap it at threshold
+            capped_loss = min(lost, loss_threshold)
+            new_money = old_money - old_money * capped_loss
+        else:
+            # Gain scenario: only capture gain_fraction of the gains
+            gained = buyhold_mon / old_money - 1
+            partial_gain = gained * gain_fraction
+            new_money = old_money + old_money * partial_gain
+
+        if new_money > self.max_money:
+            self.max_money = new_money
+
+        drawdown = 1 - new_money / self.max_money
+        if drawdown > self.max_drawdown:
+            self.max_drawdown = drawdown
+
+        return new_money
+
     def calc_all_years(self, data: list, protection: float, cap: float) -> AllYearsInfo:
         self.max_drawdown = 0
         self.max_money = 0
@@ -73,6 +109,29 @@ class Investment:
         cur_money = self.start_money
         for year_data in data:
             cur_money = self.calc_one_year(cur_money, year_data, protection, cap)
+
+        gain = cur_money / self.start_money
+        annualized_gain = pow(gain, 1 / (len(data) - 1)) - 1
+
+        return AllYearsInfo(cur_money, self.max_drawdown, gain, annualized_gain)
+    
+    def calc_all_years_partial_gain(self, data: list, loss_threshold: float, gain_fraction: float) -> AllYearsInfo:
+        """Calculate investment results over all years with partial gain buffered ETF.
+        
+        Args:
+            data: List of year data dictionaries
+            loss_threshold: Complete loss protection threshold
+            gain_fraction: Fraction of buy-and-hold gains captured
+        
+        Returns:
+            AllYearsInfo: Investment performance metrics
+        """
+        self.max_drawdown = 0
+        self.max_money = 0
+
+        cur_money = self.start_money
+        for year_data in data:
+            cur_money = self.calc_one_year_partial_gain(cur_money, year_data, loss_threshold, gain_fraction)
 
         gain = cur_money / self.start_money
         annualized_gain = pow(gain, 1 / (len(data) - 1)) - 1
@@ -197,6 +256,43 @@ def calc_multiverse(month_data: list, protection: float, cap: float, sample_time
     
     return out
 
+def calc_multiverse_sample_partial_gain(month_data: list, loss_threshold: float, gain_fraction: float) -> AllYearsInfo:
+    """Helper function to calculate a single sample for calc_multiverse_partial_gain."""
+    random.shuffle(month_data)
+    year_data = month_to_year_data(month_data)
+    invest = Investment(START_MONEY, TAX_RATE)
+    return invest.calc_all_years_partial_gain(year_data, loss_threshold, gain_fraction)
+
+def calc_multiverse_partial_gain(month_data: list, loss_threshold: float, gain_fraction: float, sample_times: int = 5, want: list = DEFAULT_PERCENTILES) -> list:
+    """Calculate multiverse results for partial gain buffered ETF.
+    
+    Args:
+        month_data: List of monthly data dictionaries
+        loss_threshold: Complete loss protection threshold
+        gain_fraction: Fraction of buy-and-hold gains captured
+        sample_times: Number of random samples to generate
+        want: List of percentiles to return
+    
+    Returns:
+        List of AllYearsInfo objects for requested percentiles
+    """
+    end_moneys = []
+    month_data = month_data.copy()  # copy to avoid modifying the original list
+
+    with ProcessPoolExecutor() as executor:
+        futures = [executor.submit(calc_multiverse_sample_partial_gain, month_data, loss_threshold, gain_fraction) for _ in range(sample_times)]
+        for future in as_completed(futures):
+            end_moneys.append(future.result())
+
+    end_moneys.sort()
+    out = []
+
+    for per in want:
+        nth = int(per / 100 * sample_times)
+        out.append(end_moneys[nth])
+    
+    return out
+
 def calc_and_print(data: list, protection: float, cap: float, tax_rate: float = TAX_RATE):
     print_cap = 'no' if cap == -1 else f'{cap * 100:.3f}%'
     print(f'\n*** Results for {protection * 100:.3f}% protection, {print_cap} cap ***')
@@ -205,6 +301,22 @@ def calc_and_print(data: list, protection: float, cap: float, tax_rate: float = 
     info = investment.calc_all_years(data, protection, cap)
     
     #print(f'Starting money: ${START_MONEY}\nEnding money: ${end_money:.2f}')
+    print(f'Max drawdown: {info.max_drawdown * 100:.3f}%\nAnnualized gain: {info.annualized * 100:.3f}%')
+
+def calc_and_print_partial_gain(data: list, loss_threshold: float, gain_fraction: float, tax_rate: float = TAX_RATE):
+    """Calculate and print results for partial gain buffered ETF.
+    
+    Args:
+        data: List of year data dictionaries
+        loss_threshold: Complete loss protection threshold (e.g., 0.15 for 15%)
+        gain_fraction: Fraction of buy-and-hold gains captured (e.g., 0.5 for 50%)
+        tax_rate: Tax rate for yield calculations
+    """
+    print(f'\n*** Results for {loss_threshold * 100:.3f}% loss threshold, {gain_fraction * 100:.3f}% of gains ***')
+
+    investment = Investment(START_MONEY, tax_rate)
+    info = investment.calc_all_years_partial_gain(data, loss_threshold, gain_fraction)
+    
     print(f'Max drawdown: {info.max_drawdown * 100:.3f}%\nAnnualized gain: {info.annualized * 100:.3f}%')
 
 def adjust_monthly_gain_with_yield(data_no_div: list, data_with_div: list, tax_rate: float) -> list:
@@ -251,26 +363,50 @@ def main():
     month_with_yield = adjust_monthly_gain_with_yield(month_data, annual_data, TAX_RATE)
 
     samples = 10000
-    #protection, cap = (1, 0.1064)
-    #protection, cap = (0.09, 0.183)
-    protection, cap = (0, -1)
-
-
-    calc_and_print(annual_data, protection, cap) # our universe
-
     percentiles = [5, 25, 50, 75, 95]
+
+    # Test different protection and cap configurations
+    protection_cap_cases = [
+        (0, -1),
+        (1, 0.1064),
+        (0.09, 0.183)
+    ]
+
+    for protection, cap in protection_cap_cases:
+        calc_and_print(annual_data, protection, cap) # our universe
+
+        # Measure execution time of the following line
+        start_time = time.time()
+        result = calc_multiverse(month_with_yield, protection, cap,
+                                 sample_times=samples, want=percentiles)
+        end_time = time.time()
+        execution_time = end_time - start_time
+        print(f'\nExecution time: {execution_time:.2f} seconds for {samples} multiverse')
+
+        print(f'\nprotection={protection}, cap={cap}, {len(month_data)} months data ***')
+        print('Perctl\tGain\tDrawdown')
+        for i, verse in enumerate(result):
+            gain = verse.annualized * 100
+            drawdown = verse.max_drawdown * 100
+            print(f'{percentiles[i]}\t{gain:.2f}%\t{drawdown:.2f}%')
+
+    # Partial gain buffered ETF results
+    loss_threshold = 0.1  # 15% loss threshold
+    gain_fraction = 0.70    # 50% of gains
+
+    calc_and_print_partial_gain(annual_data, loss_threshold, gain_fraction) # our universe
 
     # Measure execution time of the following line
     start_time = time.time()
-    result = calc_multiverse(month_with_yield, protection, cap,
-                             sample_times=samples, want=percentiles)
+    result_partial = calc_multiverse_partial_gain(month_with_yield, loss_threshold, gain_fraction,
+                                                  sample_times=samples, want=percentiles)
     end_time = time.time()
     execution_time = end_time - start_time
     print(f'\nExecution time: {execution_time:.2f} seconds for {samples} multiverse')
 
-    print(f'\nprotection={protection}, cap={cap}, {len(month_data)} months data ***')
+    print(f'\nloss_threshold={loss_threshold}, gain_fraction={gain_fraction}, {len(month_data)} months data ***')
     print('Perctl\tGain\tDrawdown')
-    for i, verse in enumerate(result):
+    for i, verse in enumerate(result_partial):
         gain = verse.annualized * 100
         drawdown = verse.max_drawdown * 100
         print(f'{percentiles[i]}\t{gain:.2f}%\t{drawdown:.2f}%')
