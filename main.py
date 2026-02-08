@@ -104,26 +104,14 @@ class Investment:
 
         return new_money
 
-    def calc_all_years(self, data: list, protection: float, cap: float) -> AllYearsInfo:
-        self.max_drawdown = 0
-        self.max_money = 0
-
-        cur_money = self.start_money
-        for year_data in data:
-            cur_money = self.calc_one_year(cur_money, year_data, protection, cap)
-
-        gain = cur_money / self.start_money
-        annualized_gain = pow(gain, 1 / (len(data) - 1)) - 1
-
-        return AllYearsInfo(cur_money, self.max_drawdown, gain, annualized_gain)
-    
-    def calc_all_years_partial_gain(self, data: list, loss_threshold: float, gain_fraction: float) -> AllYearsInfo:
-        """Calculate investment results over all years with partial gain buffered ETF.
+    def calc_all_years(self, data: list, protection: float, cap: float, verbose: bool = False) -> AllYearsInfo:
+        """Calculate investment results over all years with protection and cap buffered ETF.
         
         Args:
             data: List of year data dictionaries
-            loss_threshold: Complete loss protection threshold
-            gain_fraction: Fraction of buy-and-hold gains captured
+            protection: Downside protection percentage
+            cap: Maximum gain cap (-1 for no cap)
+            verbose: If True, print gain/loss and max drawdown so far for each year (skip when called from multiverse)
         
         Returns:
             AllYearsInfo: Investment performance metrics
@@ -132,8 +120,56 @@ class Investment:
         self.max_money = 0
 
         cur_money = self.start_money
-        for year_data in data:
+        if verbose:
+            rows = []
+        for i, year_data in enumerate(data):
+            prev_money = cur_money
+            cur_money = self.calc_one_year(cur_money, year_data, protection, cap)
+            if verbose:
+                year_gain_pct = (cur_money - prev_money) / prev_money * 100
+                year_label = year_data.get('year', i + 1)
+                rows.append((year_label, year_gain_pct, self.max_drawdown * 100))
+        if verbose and rows:
+            print('  {:>4}  {:>10}  {:>14}'.format('Year', 'Gain/Loss', 'Max DD so far'))
+            print('  ' + '-' * 32)
+            for year_label, year_gain_pct, max_dd in rows:
+                print('  {:>4}  {:>+9.2f}%  {:>13.2f}%'.format(year_label, year_gain_pct, max_dd))
+
+        gain = cur_money / self.start_money
+        annualized_gain = pow(gain, 1 / (len(data) - 1)) - 1
+
+        return AllYearsInfo(cur_money, self.max_drawdown, gain, annualized_gain)
+    
+    def calc_all_years_partial_gain(self, data: list, loss_threshold: float, gain_fraction: float, verbose: bool = False) -> AllYearsInfo:
+        """Calculate investment results over all years with partial gain buffered ETF.
+        
+        Args:
+            data: List of year data dictionaries
+            loss_threshold: Complete loss protection threshold
+            gain_fraction: Fraction of buy-and-hold gains captured
+            verbose: If True, print gain/loss and max drawdown so far for each year (skip when called from multiverse)
+        
+        Returns:
+            AllYearsInfo: Investment performance metrics
+        """
+        self.max_drawdown = 0
+        self.max_money = 0
+
+        cur_money = self.start_money
+        if verbose:
+            rows = []
+        for i, year_data in enumerate(data):
+            prev_money = cur_money
             cur_money = self.calc_one_year_partial_gain(cur_money, year_data, loss_threshold, gain_fraction)
+            if verbose:
+                year_gain_pct = (cur_money - prev_money) / prev_money * 100
+                year_label = year_data.get('year', i + 1)
+                rows.append((year_label, year_gain_pct, self.max_drawdown * 100))
+        if verbose and rows:
+            print('  {:>4}  {:>10}  {:>14}'.format('Year', 'Gain/Loss', 'Max DD so far'))
+            print('  ' + '-' * 32)
+            for year_label, year_gain_pct, max_dd in rows:
+                print('  {:>4}  {:>+9.2f}%  {:>13.2f}%'.format(year_label, year_gain_pct, max_dd))
 
         gain = cur_money / self.start_money
         annualized_gain = pow(gain, 1 / (len(data) - 1)) - 1
@@ -149,6 +185,7 @@ def read_annual_data(filename: str) -> list:
         for line_dict in csvfile:
             line_dict = dict(line_dict)
             data.append({
+                'year': int(line_dict['year']),
                 'pricegain': float(line_dict['pricegain']) + 1,
                 'yield': float(line_dict['yield'])
             })
@@ -300,7 +337,7 @@ def calc_and_print(data: list, protection: float, cap: float, tax_rate: float = 
     print(f'\n*** Results for {protection * 100:.3f}% protection, {print_cap} cap ***')
 
     investment = Investment(START_MONEY, tax_rate)
-    info = investment.calc_all_years(data, protection, cap)
+    info = investment.calc_all_years(data, protection, cap, verbose=True)
     
     #print(f'Starting money: ${START_MONEY}\nEnding money: ${end_money:.2f}')
     print(f'Max drawdown: {info.max_drawdown * 100:.3f}%\nAnnualized gain: {info.annualized * 100:.3f}%')
@@ -317,7 +354,7 @@ def calc_and_print_partial_gain(data: list, loss_threshold: float, gain_fraction
     print(f'\n*** Results for {loss_threshold * 100:.3f}% loss threshold, {gain_fraction * 100:.3f}% of gains ***')
 
     investment = Investment(START_MONEY, tax_rate)
-    info = investment.calc_all_years_partial_gain(data, loss_threshold, gain_fraction)
+    info = investment.calc_all_years_partial_gain(data, loss_threshold, gain_fraction, verbose=True)
     
     print(f'Max drawdown: {info.max_drawdown * 100:.3f}%\nAnnualized gain: {info.annualized * 100:.3f}%')
 
