@@ -28,3 +28,7 @@ python main.py --help
 |----------------|----------|-------------|
 | `daily_file`   | Yes      | Path to daily price CSV. Accepts 2-column `date`,`price` or `date`,`adj_close`. Dates in `YYYY-MM-DD`. |
 | `annual_yield` | No       | Path to annual gain/yield CSV with `year`, `pricegain`, and `yield` columns. If omitted or empty, yield is assumed 0. |
+
+## Tax treatment
+
+Tax is applied **each year**, not at the end of the backtest. For every year, the dividend/yield component of that year’s return is multiplied by `(1 - tax_rate)` when computing the buy-and-hold outcome; price gain is not taxed. The default tax rate is set in `main.py` (`TAX_RATE`); pass a different rate via the script’s tax option when available.

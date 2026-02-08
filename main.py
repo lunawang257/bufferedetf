@@ -16,11 +16,12 @@ DEFAULT_SAMPLE_TIMES = 5
 
 class AllYearsInfo:
     """Class to store and compare investment performance metrics."""
-    def __init__(self, end_money: float, max_drawdown: float, gain_per: float, annualized: float):
+    def __init__(self, end_money: float, max_drawdown: float, gain_per: float, annualized: float, bucket_max_drawdown: float = None):
         self.end_money = end_money
         self.max_drawdown = max_drawdown
         self.gain_per = gain_per
         self.annualized = annualized
+        self.bucket_max_drawdown = bucket_max_drawdown  # worst drawdown in percentile bucket (multiverse only)
 
     def __lt__(self, other):
         return self.end_money < other.end_money
@@ -300,8 +301,16 @@ def calc_multiverse(month_data: list, protection: float, cap: float, sample_time
     out = []
 
     for per in want:
-        nth = int(per / 100 * sample_times)
-        out.append(end_moneys[nth])
+        nth = min(int(per / 100 * sample_times), sample_times - 1)
+        # Bucket for this percentile: [per-25, per] so 50→25–50%, 75→50–75%, etc
+        start_idx = max(0, int((per - 25) / 100 * sample_times))
+        end_idx = max(start_idx + 1, int(per / 100 * sample_times))
+        end_idx = min(end_idx, sample_times)
+        bucket = end_moneys[start_idx:end_idx]
+        avg_drawdown = sum(s.max_drawdown for s in bucket) / len(bucket)
+        worst_drawdown = max(s.max_drawdown for s in bucket)
+        rep = end_moneys[nth]
+        out.append(AllYearsInfo(rep.end_money, avg_drawdown, rep.gain_per, rep.annualized, bucket_max_drawdown=worst_drawdown))
     
     return out
 
@@ -337,8 +346,16 @@ def calc_multiverse_partial_gain(month_data: list, loss_threshold: float, gain_f
     out = []
 
     for per in want:
-        nth = int(per / 100 * sample_times)
-        out.append(end_moneys[nth])
+        nth = min(int(per / 100 * sample_times), sample_times - 1)
+        # Bucket for this percentile: [per-25, per] so 50→25–50%, 75→50–75%, etc
+        start_idx = max(0, int((per - 25) / 100 * sample_times))
+        end_idx = max(start_idx + 1, int(per / 100 * sample_times))
+        end_idx = min(end_idx, sample_times)
+        bucket = end_moneys[start_idx:end_idx]
+        avg_drawdown = sum(s.max_drawdown for s in bucket) / len(bucket)
+        worst_drawdown = max(s.max_drawdown for s in bucket)
+        rep = end_moneys[nth]
+        out.append(AllYearsInfo(rep.end_money, avg_drawdown, rep.gain_per, rep.annualized, bucket_max_drawdown=worst_drawdown))
     
     return out
 
@@ -451,11 +468,12 @@ def main():
         print(f'\nExecution time: {execution_time:.2f} seconds for {samples} multiverse')
 
         print(f'\nprotection={protection}, cap={cap}, {len(month_data)} months data ***')
-        print('Perctl\tGain\tDrawdown')
+        print('Perctl\tGain\tDrawdown\tWorstDD')
         for i, verse in enumerate(result):
             gain = verse.annualized * 100
             drawdown = verse.max_drawdown * 100
-            print(f'{percentiles[i]}\t{gain:.2f}%\t{drawdown:.2f}%')
+            worst_dd = verse.bucket_max_drawdown * 100 if verse.bucket_max_drawdown is not None else drawdown
+            print(f'{percentiles[i]}\t{gain:.2f}%\t{drawdown:.2f}%\t{worst_dd:.2f}%')
 
     # Partial gain buffered ETF results
     loss_threshold = 0.1  # 15% loss threshold
@@ -472,11 +490,12 @@ def main():
     print(f'\nExecution time: {execution_time:.2f} seconds for {samples} multiverse')
 
     print(f'\nloss_threshold={loss_threshold}, gain_fraction={gain_fraction}, {len(month_data)} months data ***')
-    print('Perctl\tGain\tDrawdown')
+    print('Perctl\tGain\tDrawdown\tWorstDD')
     for i, verse in enumerate(result_partial):
         gain = verse.annualized * 100
         drawdown = verse.max_drawdown * 100
-        print(f'{percentiles[i]}\t{gain:.2f}%\t{drawdown:.2f}%')
+        worst_dd = verse.bucket_max_drawdown * 100 if verse.bucket_max_drawdown is not None else drawdown
+        print(f'{percentiles[i]}\t{gain:.2f}%\t{drawdown:.2f}%\t{worst_dd:.2f}%')
 
 if __name__ == "__main__":
     main()

@@ -59,11 +59,12 @@ def test_partial_gain_buffered_etf():
                                          sample_times=100, want=percentiles)
     
     print(f'\nloss_threshold=0.15, gain_fraction=0.5, {len(month_data)} months data ***')
-    print('Perctl\tGain\tDrawdown')
+    print('Perctl\tGain\tDrawdown\tWorstDD')
     for i, verse in enumerate(result):
         gain = verse.annualized * 100
         drawdown = verse.max_drawdown * 100
-        print(f'{percentiles[i]}\t{gain:.2f}%\t{drawdown:.2f}%')
+        worst_dd = verse.bucket_max_drawdown * 100 if verse.bucket_max_drawdown is not None else drawdown
+        print(f'{percentiles[i]}\t{gain:.2f}%\t{drawdown:.2f}%\t{worst_dd:.2f}%')
 
 if __name__ == "__main__":
     if pytest:
