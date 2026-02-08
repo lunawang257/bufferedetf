@@ -1,3 +1,5 @@
+#! /usr/bin/env python3
+
 import csv
 import random
 from datetime import datetime
@@ -363,6 +365,12 @@ def main():
     month_with_yield = adjust_monthly_gain_with_yield(month_data, annual_data, TAX_RATE)
 
     samples = 10000
+    #protection, cap = (1, 0.1064)
+    #protection, cap = (0.09, 0.183)
+    #protection, cap = (0, -1)
+
+    #calc_and_print(annual_data, protection, cap) # our universe
+
     percentiles = [5, 25, 50, 75, 95]
 
     # Test different protection and cap configurations
