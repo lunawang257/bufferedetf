@@ -1,0 +1,30 @@
+# Buffered ETF Backtest
+
+Backtest buffered ETF strategies (protection/cap and partial-gain) using daily price data and optional annual yield data.
+
+## Usage
+
+**Typical use** (daily price file + annual gain/yield file):
+
+```bash
+python main.py sp500-daily.csv sp500-annual-gain-yield-short.csv
+```
+
+Run with only the daily file (yield assumed 0):
+
+```bash
+python main.py sp500-daily.csv
+```
+
+Help:
+
+```bash
+python main.py --help
+```
+
+## Arguments
+
+| Argument       | Required | Description |
+|----------------|----------|-------------|
+| `daily_file`   | Yes      | Path to daily price CSV. Accepts 2-column `date`,`price` or `date`,`adj_close`. Dates in `YYYY-MM-DD`. |
+| `annual_yield` | No       | Path to annual gain/yield CSV with `year`, `pricegain`, and `yield` columns. If omitted or empty, yield is assumed 0. |

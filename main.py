@@ -1,5 +1,6 @@
 #! /usr/bin/env python3
 
+import argparse
 import csv
 import random
 from datetime import datetime
@@ -8,7 +9,8 @@ import time  # Import the time module
 
 # Constants
 START_MONEY = 1
-TAX_RATE = 0.371
+#TAX_RATE = 0.371
+TAX_RATE = 0.0
 DEFAULT_PERCENTILES = [25, 50, 75]
 DEFAULT_SAMPLE_TIMES = 5
 
@@ -192,12 +194,13 @@ def read_annual_data(filename: str) -> list:
     
     return data
 
-# date, adjusted close (adj_close)
+# Supports CSV with either "date,price" or "date,adj_close" columns
 def read_monthly_data(filename: str) -> list:
     """Read monthly data from CSV file.
     
     Args:
-        filename: Path to CSV file with date, open, adj_close columns
+        filename: Path to CSV with date and price column.
+                 Accepts either "date", "price" (2 columns) or "date", "adj_close".
         
     Returns:
         List of dictionaries with 'date' and 'gain' for all months
@@ -213,8 +216,15 @@ def read_monthly_data(filename: str) -> list:
         last_day_adj_close = None # price on 'last_day'
         for line_dict in csvfile:
             line_dict = dict(line_dict)
-            cur_adj_close = float(line_dict['adj_close'])
-            date = datetime.strptime(line_dict['date'], '%Y-%m-%d')
+            # Support both "price" and "adj_close" column names; skip rows with empty price
+            raw_price = (line_dict.get('price') or line_dict.get('adj_close') or '').strip()
+            if not raw_price:
+                continue
+            cur_adj_close = float(raw_price)
+            date_str = (line_dict.get('date') or '').strip()
+            if not date_str:
+                continue
+            date = datetime.strptime(date_str, '%Y-%m-%d')
             if prev_month is None:
                 prev_month = date.month
             elif date.month != prev_month:
@@ -395,10 +405,22 @@ def print_price_gain_with_yield(data):
         print(f'{i}: {gain} {yield_} {gain + yield_ * (1 - TAX_RATE)}')
 
 def main():
-    annual_data = read_annual_data('sp500-annual-gain-yield-short.csv')
-    daily_file = 'sp500-daily.csv'
+    parser = argparse.ArgumentParser(description='Buffered ETF backtest')
+    parser.add_argument('daily_file', help='Path to daily (or monthly) price CSV file')
+    parser.add_argument('annual_yield', nargs='?', default='',
+                        help='Path to annual gain/yield CSV file; if omitted or empty, yield is assumed 0')
+    args = parser.parse_args()
 
+    daily_file = args.daily_file
     month_data = read_monthly_data(daily_file)
+
+    if args.annual_yield.strip():
+        annual_data = read_annual_data(args.annual_yield.strip())
+        if not annual_data:
+            annual_data = month_to_year_data(month_data)
+    else:
+        annual_data = month_to_year_data(month_data)
+
     month_with_yield = adjust_monthly_gain_with_yield(month_data, annual_data, TAX_RATE)
 
     samples = 10000
