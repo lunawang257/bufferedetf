@@ -208,13 +208,13 @@ def truncate_to_full_years(month_data: list) -> list:
     return month_data[:n] if n > 0 else month_data
 
 
-# Supports CSV with either "date,price" or "date,adj_close" columns
+# Supports CSV with "date,price", "date,adj_close", or "Date,Open,High,Low,Close,Volume" columns
 def read_monthly_data(filename: str) -> list:
     """Read monthly data from CSV file.
 
     Args:
         filename: Path to CSV with date and price column.
-                 Accepts either "date", "price" (2 columns) or "date", "adj_close".
+                 Accepts: "date","price"; "date","adj_close"; or "Date","Close" (OHLCV format).
 
     Returns:
         List of dictionaries with 'date' and 'gain' for all months
@@ -230,12 +230,12 @@ def read_monthly_data(filename: str) -> list:
         last_day_adj_close = None # price on 'last_day'
         for line_dict in csvfile:
             line_dict = dict(line_dict)
-            # Support both "price" and "adj_close" column names; skip rows with empty price
-            raw_price = (line_dict.get('price') or line_dict.get('adj_close') or '').strip()
+            # Support price, adj_close, or Close column; skip rows with empty price
+            raw_price = (line_dict.get('price') or line_dict.get('adj_close') or line_dict.get('Close') or '').strip()
             if not raw_price:
                 continue
             cur_adj_close = float(raw_price)
-            date_str = (line_dict.get('date') or '').strip()
+            date_str = (line_dict.get('date') or line_dict.get('Date') or '').strip()
             if not date_str:
                 continue
             date = datetime.strptime(date_str, '%Y-%m-%d')
@@ -387,17 +387,17 @@ def calc_multiverse_partial_gain(month_data: list, annual_data: list, loss_thres
 
     return out
 
-def calc_and_print(data: list, protection: float, cap: float, tax_rate: float = TAX_RATE):
+def calc_and_print(data: list, protection: float, cap: float, tax_rate: float = TAX_RATE, verbose: bool = True):
     print_cap = 'no' if cap == -1 else f'{cap * 100:.3f}%'
     print(f'\n*** Results for {protection * 100:.3f}% protection, {print_cap} cap ***')
 
     investment = Investment(START_MONEY, tax_rate)
-    info = investment.calc_all_years(data, protection, cap, verbose=True)
+    info = investment.calc_all_years(data, protection, cap, verbose=verbose)
 
     #print(f'Starting money: ${START_MONEY}\nEnding money: ${end_money:.2f}')
     print(f'Max drawdown: {info.max_drawdown * 100:.3f}%\nAnnualized gain: {info.annualized * 100:.3f}%')
 
-def calc_and_print_partial_gain(data: list, loss_threshold: float, gain_fraction: float, tax_rate: float = TAX_RATE):
+def calc_and_print_partial_gain(data: list, loss_threshold: float, gain_fraction: float, tax_rate: float = TAX_RATE, verbose: bool = True):
     """Calculate and print results for partial gain buffered ETF.
 
     Args:
@@ -405,11 +405,12 @@ def calc_and_print_partial_gain(data: list, loss_threshold: float, gain_fraction
         loss_threshold: Complete loss protection threshold (e.g., 0.15 for 15%)
         gain_fraction: Fraction of buy-and-hold gains captured (e.g., 0.5 for 50%)
         tax_rate: Tax rate for yield calculations
+        verbose: If True, print gain/loss and max drawdown for each year
     """
     print(f'\n*** Results for {loss_threshold * 100:.3f}% loss threshold, {gain_fraction * 100:.3f}% of gains ***')
 
     investment = Investment(START_MONEY, tax_rate)
-    info = investment.calc_all_years_partial_gain(data, loss_threshold, gain_fraction, verbose=True)
+    info = investment.calc_all_years_partial_gain(data, loss_threshold, gain_fraction, verbose=verbose)
 
     print(f'Max drawdown: {info.max_drawdown * 100:.3f}%\nAnnualized gain: {info.annualized * 100:.3f}%')
 
@@ -486,6 +487,7 @@ def main():
                         help='Include only data on or after this date')
     parser.add_argument('-to', '--to-date', dest='to_date', metavar='YYYY-MM-DD',
                         help='Include only data on or before this date')
+    parser.add_argument('-q', '--quiet', action='store_true', help='Do not print each year\'s gain')
     args = parser.parse_args()
 
     daily_file = args.daily_file
@@ -530,8 +532,9 @@ def main():
         (0.09, 0.183)
     ]
 
+    verbose = not args.quiet
     for protection, cap in protection_cap_cases:
-        calc_and_print(annual_data, protection, cap) # our universe
+        calc_and_print(annual_data, protection, cap, verbose=verbose) # our universe
 
         # Measure execution time of the following line
         start_time = time.time()
@@ -553,7 +556,7 @@ def main():
     loss_threshold = 0.1  # 15% loss threshold
     gain_fraction = 0.70    # 50% of gains
 
-    calc_and_print_partial_gain(annual_data, loss_threshold, gain_fraction) # our universe
+    calc_and_print_partial_gain(annual_data, loss_threshold, gain_fraction, verbose=verbose) # our universe
 
     # Measure execution time of the following line
     start_time = time.time()
