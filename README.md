@@ -16,6 +16,12 @@ Run with only the daily file (yield assumed 0):
 python main.py sp500-daily.csv
 ```
 
+Limit the backtest to a date range:
+
+```bash
+python main.py sp500-daily.csv -from 1990-01-01 -to 2020-12-31
+```
+
 Help:
 
 ```bash
@@ -28,6 +34,8 @@ python main.py --help
 |----------------|----------|-------------|
 | `daily_file`   | Yes      | Path to daily price CSV. Accepts 2-column `date`,`price` or `date`,`adj_close`. Dates in `YYYY-MM-DD`. |
 | `annual_yield` | No       | Path to annual gain/yield CSV with `year`, `pricegain`, and `yield` columns. If omitted or empty, yield is assumed 0. |
+| `-from YYYY-MM-DD` | No   | Include only data on or after this date. |
+| `-to YYYY-MM-DD`   | No   | Include only data on or before this date. |
 
 ## Tax treatment
 

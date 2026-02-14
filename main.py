@@ -25,7 +25,7 @@ class AllYearsInfo:
 
     def __lt__(self, other):
         return self.end_money < other.end_money
-    
+
     def __eq__(self, other):
         return self.end_money == other.end_money
 
@@ -39,19 +39,19 @@ class Investment:
 
     def calc_one_year(self, old_money: float, data: dict, protection: float, cap: float) -> float:
         """Calculate investment results for one year with optional protection and cap.
-    
+
         Args:
             old_money: Starting amount of money
             data: Dictionary containing price gain and yield data
             protection: Downside protection percentage
             cap: Maximum gain cap (-1 for no cap)
-        
+
         Returns:
             float: New amount of money after calculations
         """
         buyhold_mon = old_money
         buyhold_mon *= data['pricegain'] + data['yield'] * (1 - self.tax_rate)
-        
+
         if buyhold_mon < old_money:
             lost = 1 - buyhold_mon / old_money
             new_money = old_money - old_money * max(lost - protection, 0)
@@ -64,28 +64,28 @@ class Investment:
 
         if new_money > self.max_money:
             self.max_money = new_money
-            
+
         drawdown = 1 - new_money / self.max_money
         if drawdown > self.max_drawdown:
             self.max_drawdown = drawdown
 
         return new_money
-    
+
     def calc_one_year_partial_gain(self, old_money: float, data: dict, loss_threshold: float, gain_fraction: float) -> float:
         """Calculate investment results for one year with complete loss protection after threshold and partial gains.
-    
+
         Args:
             old_money: Starting amount of money
             data: Dictionary containing price gain and yield data
             loss_threshold: Complete loss protection threshold (e.g., 0.15 means losses capped at 15%)
             gain_fraction: Fraction of buy-and-hold gains captured (e.g., 0.5 means 50% of gains)
-        
+
         Returns:
             float: New amount of money after calculations
         """
         buyhold_mon = old_money
         buyhold_mon *= data['pricegain'] + data['yield'] * (1 - self.tax_rate)
-        
+
         if buyhold_mon < old_money:
             # Loss scenario: complete protection after loss_threshold
             lost = 1 - buyhold_mon / old_money
@@ -94,9 +94,13 @@ class Investment:
             new_money = old_money - old_money * capped_loss
         else:
             # Gain scenario: only capture gain_fraction of the gains
-            gained = buyhold_mon / old_money - 1
-            partial_gain = gained * gain_fraction
-            new_money = old_money + old_money * partial_gain
+            # gain_fraction=-1 means "no cap" = 100% of gains (same as cap=-1 in calc_one_year)
+            if gain_fraction == -1:
+                new_money = buyhold_mon
+            else:
+                gained = buyhold_mon / old_money - 1
+                partial_gain = gained * gain_fraction
+                new_money = old_money + old_money * partial_gain
 
         if new_money > self.max_money:
             self.max_money = new_money
@@ -109,13 +113,13 @@ class Investment:
 
     def calc_all_years(self, data: list, protection: float, cap: float, verbose: bool = False) -> AllYearsInfo:
         """Calculate investment results over all years with protection and cap buffered ETF.
-        
+
         Args:
             data: List of year data dictionaries
             protection: Downside protection percentage
             cap: Maximum gain cap (-1 for no cap)
             verbose: If True, print gain/loss and max drawdown so far for each year (skip when called from multiverse)
-        
+
         Returns:
             AllYearsInfo: Investment performance metrics
         """
@@ -142,16 +146,16 @@ class Investment:
         annualized_gain = pow(gain, 1 / (len(data) - 1)) - 1
 
         return AllYearsInfo(cur_money, self.max_drawdown, gain, annualized_gain)
-    
+
     def calc_all_years_partial_gain(self, data: list, loss_threshold: float, gain_fraction: float, verbose: bool = False) -> AllYearsInfo:
         """Calculate investment results over all years with partial gain buffered ETF.
-        
+
         Args:
             data: List of year data dictionaries
             loss_threshold: Complete loss protection threshold
             gain_fraction: Fraction of buy-and-hold gains captured
             verbose: If True, print gain/loss and max drawdown so far for each year (skip when called from multiverse)
-        
+
         Returns:
             AllYearsInfo: Investment performance metrics
         """
@@ -192,17 +196,26 @@ def read_annual_data(filename: str) -> list:
                 'pricegain': float(line_dict['pricegain']) + 1,
                 'yield': float(line_dict['yield'])
             })
-    
+
     return data
+
+
+def truncate_to_full_years(month_data: list) -> list:
+    """Truncate monthly data to a multiple of 12 months (complete years).
+    Drops the last several months so all data is used in year chunks.
+    """
+    n = (len(month_data) // 12) * 12
+    return month_data[:n] if n > 0 else month_data
+
 
 # Supports CSV with either "date,price" or "date,adj_close" columns
 def read_monthly_data(filename: str) -> list:
     """Read monthly data from CSV file.
-    
+
     Args:
         filename: Path to CSV with date and price column.
                  Accepts either "date", "price" (2 columns) or "date", "adj_close".
-        
+
     Returns:
         List of dictionaries with 'date' and 'gain' for all months
     """
@@ -254,15 +267,15 @@ def read_monthly_data(filename: str) -> list:
 def month_to_year_data(month_data: list) -> list:
     """Convert monthly data to yearly data format by calculating yearly gains from 12-month periods.
     Doesn't alter the original list.
-    
+
     Args:
         month_data: List of dictionaries with 'date' and 'gain' keys
-        
+
     Returns:
         List of dictionaries with 'pricegain' and 'yield' keys
     """
     yearly_data = []
-    
+
     # Process data in chunks of 12 months
     for i in range(0, len(month_data) - 11, 12):  # Step by 12, ensure we have 12 months left
         year_chunk = month_data[i:i+12]
@@ -271,29 +284,36 @@ def month_to_year_data(month_data: list) -> list:
         money = start_money
         for month in year_chunk:
             money *= month['gain']
-        
+
         price_gain = money / start_money
-        
+
         yearly_data.append({
             'pricegain': price_gain,
             'yield': 0.0
         })
-    
+
     return yearly_data
 
 def calc_multiverse_sample(month_data: list, protection: float, cap: float) -> AllYearsInfo:
-    """Helper function to calculate a single sample for calc_multiverse."""
+    """Helper function to calculate a single sample for calc_multiverse.
+    Expects month_data to already have yield applied (do not shuffle before yield).
+    """
     random.shuffle(month_data)
     year_data = month_to_year_data(month_data)
     invest = Investment(START_MONEY, TAX_RATE)
     return invest.calc_all_years(year_data, protection, cap)
 
-def calc_multiverse(month_data: list, protection: float, cap: float, sample_times: int = 5, want: list = DEFAULT_PERCENTILES) -> list:
-    end_moneys = []
-    month_data = month_data.copy()  # copy to avoid modifying the original list
+def calc_multiverse(month_data: list, annual_data: list, protection: float, cap: float,
+                    sample_times: int = 5, want: list = DEFAULT_PERCENTILES,
+                    tax_rate: float = TAX_RATE) -> list:
+    """Calculate multiverse results. Yield is applied to monthly data first, before any re-ordering."""
+    # Apply yield to monthly data BEFORE any shuffling
+    month_with_yield = adjust_monthly_gain_with_yield(month_data, annual_data, tax_rate)
+    month_with_yield = month_with_yield.copy()  # copy to avoid modifying when workers shuffle
 
+    end_moneys = []
     with ProcessPoolExecutor() as executor:
-        futures = [executor.submit(calc_multiverse_sample, month_data, protection, cap) for _ in range(sample_times)]
+        futures = [executor.submit(calc_multiverse_sample, month_with_yield, protection, cap) for _ in range(sample_times)]
         for future in as_completed(futures):
             end_moneys.append(future.result())
 
@@ -311,34 +331,42 @@ def calc_multiverse(month_data: list, protection: float, cap: float, sample_time
         worst_drawdown = max(s.max_drawdown for s in bucket)
         rep = end_moneys[nth]
         out.append(AllYearsInfo(rep.end_money, avg_drawdown, rep.gain_per, rep.annualized, bucket_max_drawdown=worst_drawdown))
-    
+
     return out
 
 def calc_multiverse_sample_partial_gain(month_data: list, loss_threshold: float, gain_fraction: float) -> AllYearsInfo:
-    """Helper function to calculate a single sample for calc_multiverse_partial_gain."""
+    """Helper function to calculate a single sample for calc_multiverse_partial_gain.
+    Expects month_data to already have yield applied (do not shuffle before yield).
+    """
     random.shuffle(month_data)
     year_data = month_to_year_data(month_data)
     invest = Investment(START_MONEY, TAX_RATE)
     return invest.calc_all_years_partial_gain(year_data, loss_threshold, gain_fraction)
 
-def calc_multiverse_partial_gain(month_data: list, loss_threshold: float, gain_fraction: float, sample_times: int = 5, want: list = DEFAULT_PERCENTILES) -> list:
+def calc_multiverse_partial_gain(month_data: list, annual_data: list, loss_threshold: float, gain_fraction: float,
+                                 sample_times: int = 5, want: list = DEFAULT_PERCENTILES,
+                                 tax_rate: float = TAX_RATE) -> list:
     """Calculate multiverse results for partial gain buffered ETF.
-    
+    Yield is applied to monthly data first, before any re-ordering.
+
     Args:
         month_data: List of monthly data dictionaries
+        annual_data: Annual data with pricegain and yield for yield adjustment
         loss_threshold: Complete loss protection threshold
         gain_fraction: Fraction of buy-and-hold gains captured
         sample_times: Number of random samples to generate
         want: List of percentiles to return
-    
+
     Returns:
         List of AllYearsInfo objects for requested percentiles
     """
-    end_moneys = []
-    month_data = month_data.copy()  # copy to avoid modifying the original list
+    # Apply yield to monthly data BEFORE any shuffling
+    month_with_yield = adjust_monthly_gain_with_yield(month_data, annual_data, tax_rate)
+    month_with_yield = month_with_yield.copy()  # copy to avoid modifying when workers shuffle
 
+    end_moneys = []
     with ProcessPoolExecutor() as executor:
-        futures = [executor.submit(calc_multiverse_sample_partial_gain, month_data, loss_threshold, gain_fraction) for _ in range(sample_times)]
+        futures = [executor.submit(calc_multiverse_sample_partial_gain, month_with_yield, loss_threshold, gain_fraction) for _ in range(sample_times)]
         for future in as_completed(futures):
             end_moneys.append(future.result())
 
@@ -356,7 +384,7 @@ def calc_multiverse_partial_gain(month_data: list, loss_threshold: float, gain_f
         worst_drawdown = max(s.max_drawdown for s in bucket)
         rep = end_moneys[nth]
         out.append(AllYearsInfo(rep.end_money, avg_drawdown, rep.gain_per, rep.annualized, bucket_max_drawdown=worst_drawdown))
-    
+
     return out
 
 def calc_and_print(data: list, protection: float, cap: float, tax_rate: float = TAX_RATE):
@@ -365,13 +393,13 @@ def calc_and_print(data: list, protection: float, cap: float, tax_rate: float = 
 
     investment = Investment(START_MONEY, tax_rate)
     info = investment.calc_all_years(data, protection, cap, verbose=True)
-    
+
     #print(f'Starting money: ${START_MONEY}\nEnding money: ${end_money:.2f}')
     print(f'Max drawdown: {info.max_drawdown * 100:.3f}%\nAnnualized gain: {info.annualized * 100:.3f}%')
 
 def calc_and_print_partial_gain(data: list, loss_threshold: float, gain_fraction: float, tax_rate: float = TAX_RATE):
     """Calculate and print results for partial gain buffered ETF.
-    
+
     Args:
         data: List of year data dictionaries
         loss_threshold: Complete loss protection threshold (e.g., 0.15 for 15%)
@@ -382,16 +410,16 @@ def calc_and_print_partial_gain(data: list, loss_threshold: float, gain_fraction
 
     investment = Investment(START_MONEY, tax_rate)
     info = investment.calc_all_years_partial_gain(data, loss_threshold, gain_fraction, verbose=True)
-    
+
     print(f'Max drawdown: {info.max_drawdown * 100:.3f}%\nAnnualized gain: {info.annualized * 100:.3f}%')
 
 def adjust_monthly_gain_with_yield(data_no_div: list, data_with_div: list, tax_rate: float) -> list:
     """Adjust the monthly gain in data_no_div with the yield in data_with_div.
-    
+
     Args:
         data_no_div: List of dictionaries with 'date' and 'gain' keys (monthly data)
         data_with_div: List of dictionaries with 'pricegain' and 'yield' keys (annual data)
-        
+
     Returns:
         List of dictionaries with adjusted 'gain' values
     """
@@ -409,7 +437,7 @@ def adjust_monthly_gain_with_yield(data_no_div: list, data_with_div: list, tax_r
             annual_yield_ratio = (annual_gain + annual_yield * (1 - tax_rate)) / annual_gain
             monthly_yield = annual_yield_ratio ** (1 / 12)
             adjusted_data[i]['gain'] *= monthly_yield
-        
+
         if month == 12:  # Move to the next year after December
             year_index += 1
 
@@ -421,24 +449,70 @@ def print_price_gain_with_yield(data):
         yield_ = data[i]['yield']
         print(f'{i}: {gain} {yield_} {gain + yield_ * (1 - TAX_RATE)}')
 
+def filter_by_date_range(month_data: list, from_date: datetime, to_date: datetime) -> list:
+    """Filter monthly data to only include months within the given date range.
+
+    Args:
+        month_data: List of dicts with 'date' (last day of month) and 'gain'
+        from_date: Inclusive start date (YYYY-MM-DD)
+        to_date: Inclusive end date (YYYY-MM-DD)
+
+    Returns:
+        Filtered list of monthly data
+    """
+    return [m for m in month_data if from_date <= m['date'] <= to_date]
+
+
+def filter_annual_by_year_range(annual_data: list, from_year: int, to_year: int) -> list:
+    """Filter annual data to only include years within the given range.
+
+    Args:
+        annual_data: List of dicts with 'year', 'pricegain', 'yield'
+        from_year: Inclusive start year
+        to_year: Inclusive end year
+
+    Returns:
+        Filtered list of annual data
+    """
+    return [a for a in annual_data if from_year <= a['year'] <= to_year]
+
+
 def main():
     parser = argparse.ArgumentParser(description='Buffered ETF backtest')
     parser.add_argument('daily_file', help='Path to daily (or monthly) price CSV file')
     parser.add_argument('annual_yield', nargs='?', default='',
                         help='Path to annual gain/yield CSV file; if omitted or empty, yield is assumed 0')
+    parser.add_argument('-from', '--from-date', dest='from_date', metavar='YYYY-MM-DD',
+                        help='Include only data on or after this date')
+    parser.add_argument('-to', '--to-date', dest='to_date', metavar='YYYY-MM-DD',
+                        help='Include only data on or before this date')
     args = parser.parse_args()
 
     daily_file = args.daily_file
     month_data = read_monthly_data(daily_file)
 
+    # Apply date range filter if -from and/or -to specified
+    if args.from_date or args.to_date:
+        from_dt = datetime.strptime(args.from_date, '%Y-%m-%d') if args.from_date else datetime.min
+        to_dt = datetime.strptime(args.to_date, '%Y-%m-%d') if args.to_date else datetime.max
+        month_data = filter_by_date_range(month_data, from_dt, to_dt)
+        if not month_data:
+            print('Error: No data remains after applying date range filter.')
+            return
+
+    # Truncate to complete years (multiple of 12 months)
+    month_data = truncate_to_full_years(month_data)
+
     if args.annual_yield.strip():
         annual_data = read_annual_data(args.annual_yield.strip())
         if not annual_data:
             annual_data = month_to_year_data(month_data)
+        elif args.from_date or args.to_date:
+            from_year = int(args.from_date[:4]) if args.from_date else 0
+            to_year = int(args.to_date[:4]) if args.to_date else 9999
+            annual_data = filter_annual_by_year_range(annual_data, from_year, to_year)
     else:
         annual_data = month_to_year_data(month_data)
-
-    month_with_yield = adjust_monthly_gain_with_yield(month_data, annual_data, TAX_RATE)
 
     samples = 10000
     #protection, cap = (1, 0.1064)
@@ -461,7 +535,7 @@ def main():
 
         # Measure execution time of the following line
         start_time = time.time()
-        result = calc_multiverse(month_with_yield, protection, cap,
+        result = calc_multiverse(month_data, annual_data, protection, cap,
                                  sample_times=samples, want=percentiles)
         end_time = time.time()
         execution_time = end_time - start_time
@@ -483,7 +557,7 @@ def main():
 
     # Measure execution time of the following line
     start_time = time.time()
-    result_partial = calc_multiverse_partial_gain(month_with_yield, loss_threshold, gain_fraction,
+    result_partial = calc_multiverse_partial_gain(month_data, annual_data, loss_threshold, gain_fraction,
                                                   sample_times=samples, want=percentiles)
     end_time = time.time()
     execution_time = end_time - start_time
