@@ -6,6 +6,7 @@ import random
 from datetime import datetime
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import time  # Import the time module
+from collections import defaultdict
 
 # Constants
 START_MONEY = 1
@@ -500,6 +501,231 @@ def filter_annual_by_year_range(annual_data: list, from_year: int, to_year: int)
     return [a for a in annual_data if from_year <= a['year'] <= to_year]
 
 
+def _get_col(line_dict: dict, *candidates: str) -> str:
+    """Get value from dict with case-insensitive key match."""
+    keys_lower = {k.lower(): k for k in line_dict}
+    for c in candidates:
+        if c.lower() in keys_lower:
+            return line_dict[keys_lower[c.lower()]].strip()
+    return ''
+
+
+def read_daily_ohlc(filename: str) -> list:
+    """Read daily OHLC data from CSV file.
+
+    Expects columns: date, open/Open, High/high, Low/low, Close/adj_close.
+
+    Returns:
+        List of dicts with 'date', 'open', 'high', 'low', 'close'
+    """
+    data = []
+    with open(filename, mode='r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            row = dict(row)
+            date_str = (row.get('date') or row.get('Date') or '').strip()
+            if not date_str:
+                continue
+            close_val = _get_col(row, 'adj_close', 'Close', 'close')
+            if not close_val:
+                continue
+            try:
+                dt = datetime.strptime(date_str, '%Y-%m-%d')
+                open_val = float(_get_col(row, 'open', 'Open') or close_val)
+                high_val = float(_get_col(row, 'High', 'high') or close_val)
+                low_val = float(_get_col(row, 'Low', 'low') or close_val)
+                close_val = float(close_val)
+            except (ValueError, TypeError):
+                continue
+            data.append({
+                'date': dt,
+                'open': open_val,
+                'high': high_val,
+                'low': low_val,
+                'close': close_val,
+            })
+    return data
+
+
+def aggregate_ohlc(daily_data: list, freq: str) -> list:
+    """Aggregate daily OHLC to monthly, quarterly, or annual bars.
+
+    Args:
+        daily_data: List of dicts with 'date', 'open', 'high', 'low', 'close'
+        freq: 'monthly', 'quarterly', or 'annual'
+
+    Returns:
+        List of dicts with 'date', 'open', 'high', 'low', 'close'
+    """
+    if not daily_data:
+        return []
+    daily_data = sorted(daily_data, key=lambda x: x['date'])
+    groups = defaultdict(list)
+    for d in daily_data:
+        dt = d['date']
+        if freq == 'monthly':
+            key = (dt.year, dt.month)
+        elif freq == 'quarterly':
+            q = (dt.month - 1) // 3 + 1
+            key = (dt.year, q)
+        else:
+            key = (dt.year,)
+        groups[key].append(d)
+    result = []
+    for key in sorted(groups.keys()):
+        bars = groups[key]
+        first, last = bars[0], bars[-1]
+        result.append({
+            'date': last['date'],
+            'open': first['open'],
+            'high': max(b['high'] for b in bars),
+            'low': min(b['low'] for b in bars),
+            'close': last['close'],
+        })
+    return result
+
+
+def filter_daily_by_date_range(daily_data: list, from_date: datetime, to_date: datetime) -> list:
+    """Filter daily OHLC data to the given date range."""
+    return [d for d in daily_data if from_date <= d['date'] <= to_date]
+
+
+def _apply_yield_to_ohlc(ohlc: list, annual_data: list, freq: str, tax_rate: float) -> list:
+    """Convert price OHLC to total-return (dividend-adjusted) OHLC.
+
+    Uses cumulative total return index. O, H, L, C are scaled so close includes dividends.
+    """
+    if not ohlc or not annual_data:
+        return ohlc
+    year_to_annual = {a['year']: a for a in annual_data}
+    base = ohlc[0]['close']
+    cum_tr = [base]
+    for i in range(1, len(ohlc)):
+        bar = ohlc[i]
+        prev_bar = ohlc[i - 1]
+        year = bar['date'].year
+        ann = year_to_annual.get(year)
+        if ann:
+            total_return = ann['pricegain'] + ann['yield'] * (1 - tax_rate)
+            if freq == 'annual':
+                tr_gain = total_return
+            else:
+                price_gain = bar['close'] / prev_bar['close']
+                annual_yield_ratio = total_return / ann['pricegain']
+                adj = annual_yield_ratio ** (1 / 12) if freq == 'monthly' else annual_yield_ratio ** (1 / 4)
+                tr_gain = price_gain * adj
+        else:
+            tr_gain = bar['close'] / prev_bar['close']
+        cum_tr.append(cum_tr[-1] * tr_gain)
+    result = []
+    for i, bar in enumerate(ohlc):
+        o, h, l, c = bar['open'], bar['high'], bar['low'], bar['close']
+        scale = cum_tr[i] / c if c > 0 else 1
+        result.append({
+            'date': bar['date'],
+            'open': cum_tr[i - 1] if i > 0 else base,
+            'high': h * scale,
+            'low': l * scale,
+            'close': cum_tr[i],
+        })
+    return result
+
+
+def plot_price_candlestick(daily_file: str, from_date: datetime, to_date: datetime,
+                          annual_yield_file: str = '', tax_rate: float = TAX_RATE,
+                          ymin: float = None, ymax: float = None) -> None:
+    """Plot price OHLC candles for the date range.
+
+    Uses monthly data if range <= 20 years, quarterly if > 20 and <= 50 years,
+    annual if > 50 years. X-axis: year. Y-axis: price relative to close of first
+    period (indexed to 1.0). Green=up, Red=down.
+    When annual_yield_file is provided, plots total return (price + dividends).
+    Use -ymin and -ymax to set y-axis limits (in relative units, e.g. 0.8 = 80%% of first close).
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Rectangle
+
+    daily_data = read_daily_ohlc(daily_file)
+    if not daily_data:
+        print('Error: No OHLC data found in file.')
+        return
+    daily_data = filter_daily_by_date_range(daily_data, from_date, to_date)
+    if not daily_data:
+        print('Error: No data in the specified date range.')
+        return
+
+    years_span = (to_date.year - from_date.year) + (to_date.month - from_date.month) / 12 + (to_date.day - from_date.day) / 365
+    if years_span > 50:
+        freq = 'annual'
+    elif years_span > 20:
+        freq = 'quarterly'
+    else:
+        freq = 'monthly'
+
+    ohlc = aggregate_ohlc(daily_data, freq)
+    with_dividends = False
+    if annual_yield_file.strip():
+        annual_data = read_annual_data(annual_yield_file.strip())
+        from_year = from_date.year
+        to_year = to_date.year
+        annual_data = filter_annual_by_year_range(annual_data, from_year, to_year)
+        if annual_data:
+            ohlc = _apply_yield_to_ohlc(ohlc, annual_data, freq, tax_rate)
+            with_dividends = True
+
+    # Scale y-axis relative to close price of first period being plotted
+    first_close = ohlc[0]['close']
+    ohlc_rel = []
+    for bar in ohlc:
+        ohlc_rel.append({
+            'date': bar['date'],
+            'open': bar['open'] / first_close,
+            'high': bar['high'] / first_close,
+            'low': bar['low'] / first_close,
+            'close': bar['close'] / first_close,
+        })
+    ohlc = ohlc_rel
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.set_xlabel('Year')
+    ax.set_ylabel(f'Price (relative to first {freq} close = 1.0)')
+    title = f'Price + dividends ({freq})' if with_dividends else f'Price ({freq})'
+    ax.set_title(f'{title} — {from_date.strftime("%Y-%m-%d")} to {to_date.strftime("%Y-%m-%d")}')
+
+    width = 0.8
+    for i, bar in enumerate(ohlc):
+        x = i
+        o, h, l, c = bar['open'], bar['high'], bar['low'], bar['close']
+        color = 'green' if c >= o else 'red'
+        # Wick from low to high
+        ax.plot([x, x], [l, h], color=color, linewidth=1)
+        # Body
+        body_bottom = min(o, c)
+        body_height = abs(c - o)
+        if body_height < (h - l) * 0.01:
+            body_height = (h - l) * 0.02
+            body_bottom = (o + c) / 2 - body_height / 2
+        ax.add_patch(Rectangle((x - width / 2, body_bottom), width, body_height,
+                               facecolor=color, edgecolor=color))
+
+    if ohlc:
+        year_to_first_idx = {}
+        for i, bar in enumerate(ohlc):
+            y = bar['date'].year
+            if y not in year_to_first_idx:
+                year_to_first_idx[y] = i
+        indices = sorted(year_to_first_idx.values())
+        ax.set_xticks(indices)
+        ax.set_xticklabels([ohlc[i]['date'].strftime('%Y') for i in indices])
+
+    if ymin is not None and ymax is not None:
+        ax.set_ylim(ymin, ymax)
+    else:
+        ax.autoscale()
+    plt.tight_layout()
+    plt.show()
+
+
 def main():
     parser = argparse.ArgumentParser(description='Buffered ETF backtest')
     parser.add_argument('daily_file', help='Path to daily (or monthly) price CSV file')
@@ -514,20 +740,28 @@ def main():
                         metavar='N', help='Number of multiverse samples (default: 10000)')
     parser.add_argument('-S', '--skip-multiverse', action='store_true',
                         help='Skip multiverse calculations (run only our universe)')
+    parser.add_argument('-plot', '--plot', dest='plot', action='store_true',
+                        help='Plot price OHLC candlesticks for the -from to -to range')
+    parser.add_argument('-ymin', type=float, default=None,
+                        help='Y-axis minimum (relative to first period close, e.g. 0.8 = 80%%)')
+    parser.add_argument('-ymax', type=float, default=None,
+                        help='Y-axis maximum (relative to first period close, e.g. 1.2 = 120%%)')
     args = parser.parse_args()
 
     daily_file = args.daily_file
     month_data = read_monthly_data(daily_file)
 
-    # Apply date range filter if -from and/or -to specified
-    from_dt = to_dt = from_norm = to_norm = None
-    if args.from_date or args.to_date:
-        from_dt, from_norm = parse_date_arg(args.from_date or '', is_from=True)
-        to_dt, to_norm = parse_date_arg(args.to_date or '', is_from=False)
-        month_data = filter_by_date_range(month_data, from_dt, to_dt)
-        if not month_data:
-            print('Error: No data remains after applying date range filter.')
-            return
+    from_dt, from_norm = parse_date_arg(args.from_date or '', is_from=True)
+    to_dt, to_norm = parse_date_arg(args.to_date or '', is_from=False)
+    month_data = filter_by_date_range(month_data, from_dt, to_dt)
+    if not month_data:
+        print('Error: No data remains after applying date range filter.')
+        return
+
+    if args.plot:
+        plot_price_candlestick(daily_file, from_dt, to_dt,
+                              annual_yield_file=args.annual_yield or '', tax_rate=TAX_RATE,
+                              ymin=args.ymin, ymax=args.ymax)
 
     # Truncate to complete years (multiple of 12 months)
     month_data = truncate_to_full_years(month_data)
