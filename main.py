@@ -450,6 +450,28 @@ def print_price_gain_with_yield(data):
         yield_ = data[i]['yield']
         print(f'{i}: {gain} {yield_} {gain + yield_ * (1 - TAX_RATE)}')
 
+def parse_date_arg(value: str, is_from: bool) -> tuple:
+    """Parse -from or -to argument. Year-only (e.g. 1980) becomes 1980-01-01 (from) or 1980-12-31 (to).
+
+    Returns:
+        tuple: (datetime, normalized_str) for use in filtering
+    """
+    if not value:
+        return (datetime.min, None) if is_from else (datetime.max, None)
+    value = value.strip()
+    if len(value) == 4 and value.isdigit():
+        year = int(value)
+        if is_from:
+            dt = datetime(year, 1, 1)
+            norm = f'{year}-01-01'
+        else:
+            dt = datetime(year, 12, 31)
+            norm = f'{year}-12-31'
+        return (dt, norm)
+    dt = datetime.strptime(value, '%Y-%m-%d')
+    return (dt, value)
+
+
 def filter_by_date_range(month_data: list, from_date: datetime, to_date: datetime) -> list:
     """Filter monthly data to only include months within the given date range.
 
@@ -483,20 +505,25 @@ def main():
     parser.add_argument('daily_file', help='Path to daily (or monthly) price CSV file')
     parser.add_argument('annual_yield', nargs='?', default='',
                         help='Path to annual gain/yield CSV file; if omitted or empty, yield is assumed 0')
-    parser.add_argument('-from', '--from-date', dest='from_date', metavar='YYYY-MM-DD',
-                        help='Include only data on or after this date')
-    parser.add_argument('-to', '--to-date', dest='to_date', metavar='YYYY-MM-DD',
-                        help='Include only data on or before this date')
+    parser.add_argument('-from', '--from-date', dest='from_date', metavar='YYYY[-MM-DD]',
+                        help='Include only data on or after this date (year only, e.g. 1980, becomes YYYY-01-01)')
+    parser.add_argument('-to', '--to-date', dest='to_date', metavar='YYYY[-MM-DD]',
+                        help='Include only data on or before this date (year only, e.g. 1980, becomes YYYY-12-31)')
     parser.add_argument('-q', '--quiet', action='store_true', help='Do not print each year\'s gain')
+    parser.add_argument('-s', '--samples', type=int, default=10000,
+                        metavar='N', help='Number of multiverse samples (default: 10000)')
+    parser.add_argument('-S', '--skip-multiverse', action='store_true',
+                        help='Skip multiverse calculations (run only our universe)')
     args = parser.parse_args()
 
     daily_file = args.daily_file
     month_data = read_monthly_data(daily_file)
 
     # Apply date range filter if -from and/or -to specified
+    from_dt = to_dt = from_norm = to_norm = None
     if args.from_date or args.to_date:
-        from_dt = datetime.strptime(args.from_date, '%Y-%m-%d') if args.from_date else datetime.min
-        to_dt = datetime.strptime(args.to_date, '%Y-%m-%d') if args.to_date else datetime.max
+        from_dt, from_norm = parse_date_arg(args.from_date or '', is_from=True)
+        to_dt, to_norm = parse_date_arg(args.to_date or '', is_from=False)
         month_data = filter_by_date_range(month_data, from_dt, to_dt)
         if not month_data:
             print('Error: No data remains after applying date range filter.')
@@ -509,14 +536,14 @@ def main():
         annual_data = read_annual_data(args.annual_yield.strip())
         if not annual_data:
             annual_data = month_to_year_data(month_data)
-        elif args.from_date or args.to_date:
-            from_year = int(args.from_date[:4]) if args.from_date else 0
-            to_year = int(args.to_date[:4]) if args.to_date else 9999
+        elif from_norm is not None or to_norm is not None:
+            from_year = int(from_norm[:4]) if from_norm else 0
+            to_year = int(to_norm[:4]) if to_norm else 9999
             annual_data = filter_annual_by_year_range(annual_data, from_year, to_year)
     else:
         annual_data = month_to_year_data(month_data)
 
-    samples = 10000
+    samples = args.samples
     #protection, cap = (1, 0.1064)
     #protection, cap = (0.09, 0.183)
     #protection, cap = (0, -1)
@@ -536,21 +563,22 @@ def main():
     for protection, cap in protection_cap_cases:
         calc_and_print(annual_data, protection, cap, verbose=verbose) # our universe
 
-        # Measure execution time of the following line
-        start_time = time.time()
-        result = calc_multiverse(month_data, annual_data, protection, cap,
-                                 sample_times=samples, want=percentiles)
-        end_time = time.time()
-        execution_time = end_time - start_time
-        print(f'\nExecution time: {execution_time:.2f} seconds for {samples} multiverse')
+        if not args.skip_multiverse:
+            # Measure execution time of the following line
+            start_time = time.time()
+            result = calc_multiverse(month_data, annual_data, protection, cap,
+                                     sample_times=samples, want=percentiles)
+            end_time = time.time()
+            execution_time = end_time - start_time
+            print(f'\nExecution time: {execution_time:.2f} seconds for {samples} multiverse')
 
-        print(f'\nprotection={protection}, cap={cap}, {len(month_data)} months data ***')
-        print('Perctl\tGain\tDrawdown\tWorstDD')
-        for i, verse in enumerate(result):
-            gain = verse.annualized * 100
-            drawdown = verse.max_drawdown * 100
-            worst_dd = verse.bucket_max_drawdown * 100 if verse.bucket_max_drawdown is not None else drawdown
-            print(f'{percentiles[i]}\t{gain:.2f}%\t{drawdown:.2f}%\t{worst_dd:.2f}%')
+            print(f'\nprotection={protection}, cap={cap}, {len(month_data)} months data ***')
+            print('Perctl\tGain\tDrawdown\tWorstDD')
+            for i, verse in enumerate(result):
+                gain = verse.annualized * 100
+                drawdown = verse.max_drawdown * 100
+                worst_dd = verse.bucket_max_drawdown * 100 if verse.bucket_max_drawdown is not None else drawdown
+                print(f'{percentiles[i]}\t{gain:.2f}%\t{drawdown:.2f}%\t{worst_dd:.2f}%')
 
     # Partial gain buffered ETF results
     loss_threshold = 0.1  # 15% loss threshold
@@ -558,21 +586,22 @@ def main():
 
     calc_and_print_partial_gain(annual_data, loss_threshold, gain_fraction, verbose=verbose) # our universe
 
-    # Measure execution time of the following line
-    start_time = time.time()
-    result_partial = calc_multiverse_partial_gain(month_data, annual_data, loss_threshold, gain_fraction,
-                                                  sample_times=samples, want=percentiles)
-    end_time = time.time()
-    execution_time = end_time - start_time
-    print(f'\nExecution time: {execution_time:.2f} seconds for {samples} multiverse')
+    if not args.skip_multiverse:
+        # Measure execution time of the following line
+        start_time = time.time()
+        result_partial = calc_multiverse_partial_gain(month_data, annual_data, loss_threshold, gain_fraction,
+                                                      sample_times=samples, want=percentiles)
+        end_time = time.time()
+        execution_time = end_time - start_time
+        print(f'\nExecution time: {execution_time:.2f} seconds for {samples} multiverse')
 
-    print(f'\nloss_threshold={loss_threshold}, gain_fraction={gain_fraction}, {len(month_data)} months data ***')
-    print('Perctl\tGain\tDrawdown\tWorstDD')
-    for i, verse in enumerate(result_partial):
-        gain = verse.annualized * 100
-        drawdown = verse.max_drawdown * 100
-        worst_dd = verse.bucket_max_drawdown * 100 if verse.bucket_max_drawdown is not None else drawdown
-        print(f'{percentiles[i]}\t{gain:.2f}%\t{drawdown:.2f}%\t{worst_dd:.2f}%')
+        print(f'\nloss_threshold={loss_threshold}, gain_fraction={gain_fraction}, {len(month_data)} months data ***')
+        print('Perctl\tGain\tDrawdown\tWorstDD')
+        for i, verse in enumerate(result_partial):
+            gain = verse.annualized * 100
+            drawdown = verse.max_drawdown * 100
+            worst_dd = verse.bucket_max_drawdown * 100 if verse.bucket_max_drawdown is not None else drawdown
+            print(f'{percentiles[i]}\t{gain:.2f}%\t{drawdown:.2f}%\t{worst_dd:.2f}%')
 
 if __name__ == "__main__":
     main()
