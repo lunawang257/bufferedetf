@@ -181,6 +181,21 @@ class Investment:
 
         return AllYearsInfo(cur_money, self.max_drawdown, gain, annualized_gain)
 
+
+def _partial_gain_multiplier(price_gain: float, loss_threshold: float, gain_fraction: float) -> float:
+    """Return the multiplier (new_money/old_money) for partial-gain buffered ETF with given cumulative return.
+    Pure function: no Investment instance, for use in mark-to-market valuations."""
+    if price_gain < 1:
+        lost = 1 - price_gain
+        capped_loss = min(lost, loss_threshold)
+        return 1 - capped_loss
+    if gain_fraction == -1:
+        return price_gain
+    gained = price_gain - 1
+    partial_gain = gained * gain_fraction
+    return 1 + partial_gain
+
+
 def _read_annual_raw(filename: str) -> list:
     """Read annual CSV (year, pricegain, yield). Returns list of dicts with year, pricegain, yield.
     Only used internally by read_monthly_data.
@@ -374,6 +389,90 @@ def calc_and_print_partial_gain(data: list, loss_threshold: float, gain_fraction
     info = investment.calc_all_years_partial_gain(data, loss_threshold, gain_fraction, verbose=verbose)
 
     print(f'Max drawdown: {info.max_drawdown * 100:.3f}%\nAnnualized gain: {info.annualized * 100:.3f}%')
+
+
+def calc_pipelines(month_data: list, num_pipelines: int, loss_threshold: float, gain_fraction: float,
+                  start_money: float, verbose: bool = False) -> AllYearsInfo:
+    """Pipelines strategy: deploy 1/num_pipelines of portfolio value num_pipelines times per year into partial-gain buffered ETFs;
+    each position is held 12 months then sold and proceeds reinvested. Returns stats (drawdown, gain, annualized)."""
+    if not (1 <= num_pipelines <= 12):
+        raise ValueError('num_pipelines must be between 1 and 12')
+    deployment_months = {1 + (12 * k) // num_pipelines for k in range(num_pipelines)}
+
+    cash = start_money
+    pipelines = []  # list of (initial_value, start_idx, cumulative_gain)
+    max_money = start_money
+    max_drawdown = 0.0
+
+    num_months = len(month_data)
+    verbose_rows = [] if verbose else None
+    prev_year_end_value = start_money  # for per-year gain in verbose (match partial-gain table)
+
+    for i in range(num_months):
+        # 1) Start of month: close pipelines that have reached 12 months
+        to_remove = [j for j, (_, start_idx, _) in enumerate(pipelines) if i - start_idx == 12]
+        for j in reversed(to_remove):
+            init, _, cum = pipelines[j]
+            cash += init * _partial_gain_multiplier(cum, loss_threshold, gain_fraction)
+            del pipelines[j]
+
+        # 2) If deployment month: value all at start-of-month, then deploy (1/num_pipelines)*total
+        month = month_data[i]['date'].month
+        if month in deployment_months:
+            total = cash
+            for (init, start_idx, cum) in pipelines:
+                total += init * _partial_gain_multiplier(cum, loss_threshold, gain_fraction)
+            deploy = (1 / num_pipelines) * total
+            cash -= deploy
+            pipelines.append((deploy, i, 1.0))
+
+        # 3) Apply this month's gain to all pipelines
+        gain_i = month_data[i]['gain']
+        for j in range(len(pipelines)):
+            init, start_idx, cum = pipelines[j]
+            pipelines[j] = (init, start_idx, cum * gain_i)
+
+        # 4) End-of-month portfolio value; only update drawdown at year-end (consistent with partial-gain)
+        port_value = cash
+        for (init, start_idx, cum) in pipelines:
+            port_value += init * _partial_gain_multiplier(cum, loss_threshold, gain_fraction)
+        if (i + 1) % 12 == 0:
+            if port_value > max_money:
+                max_money = port_value
+            dd = 1 - port_value / max_money
+            if dd > max_drawdown:
+                max_drawdown = dd
+
+        if verbose and (i + 1) % 12 == 0:
+            year_label = month_data[i]['date'].year
+            year_gain_pct = (port_value - prev_year_end_value) / prev_year_end_value * 100
+            verbose_rows.append((year_label, year_gain_pct, max_drawdown * 100))
+            prev_year_end_value = port_value
+
+    end_money = cash
+    for (init, start_idx, cum) in pipelines:
+        end_money += init * _partial_gain_multiplier(cum, loss_threshold, gain_fraction)
+
+    gain = end_money / start_money
+    num_years = num_months / 12
+    annualized = (pow(gain, 1 / (num_years - 1)) - 1) if num_years > 1 else 0.0
+
+    if verbose and verbose_rows:
+        print('  {:>4}  {:>10}  {:>14}'.format('Year', 'Gain/Loss', 'Max DD so far'))
+        print('  ' + '-' * 32)
+        for year_label, gain_pct, max_dd in verbose_rows:
+            print('  {:>4}  {:>+9.2f}%  {:>13.2f}%'.format(year_label, gain_pct, max_dd))
+
+    return AllYearsInfo(end_money, max_drawdown, gain, annualized)
+
+
+def calc_and_print_pipelines(month_data: list, num_pipelines: int, loss_threshold: float, gain_fraction: float,
+                             verbose: bool = True) -> None:
+    """Run pipelines strategy and print max drawdown and annualized gain (same style as partial-gain)."""
+    print(f'\n*** Pipelines (num_pipelines={num_pipelines}): {loss_threshold * 100:.3f}% loss threshold, {gain_fraction * 100:.3f}% of gains ***')
+    info = calc_pipelines(month_data, num_pipelines, loss_threshold, gain_fraction, START_MONEY, verbose=verbose)
+    print(f'Max drawdown: {info.max_drawdown * 100:.3f}%\nAnnualized gain: {info.annualized * 100:.3f}%')
+
 
 def parse_date_arg(value: str, is_from: bool) -> tuple:
     """Parse -from or -to argument. Year-only (e.g. 1980) becomes 1980-01-01 (from) or 1980-12-31 (to).
@@ -655,6 +754,8 @@ def main():
                         help='Y-axis minimum (relative to first period close, e.g. 0.8 = 80%%)')
     parser.add_argument('-ymax', type=float, default=None,
                         help='Y-axis maximum (relative to first period close, e.g. 1.2 = 120%%)')
+    parser.add_argument('--pipelines-n', type=int, default=4, dest='num_pipelines', metavar='N',
+                        help='Pipelines strategy: deployments per year 1-12 (default: 4)')
     args = parser.parse_args()
 
     daily_file = args.daily_file
@@ -734,6 +835,13 @@ def main():
             drawdown = verse.max_drawdown * 100
             worst_dd = verse.bucket_max_drawdown * 100 if verse.bucket_max_drawdown is not None else drawdown
             print(f'{percentiles[i]}\t{gain:.2f}%\t{drawdown:.2f}%\t{worst_dd:.2f}%')
+
+    # Pipelines strategy (same loss_threshold, gain_fraction as partial-gain)
+    num_pipelines = args.num_pipelines
+    if not (1 <= num_pipelines <= 12):
+        print(f'Error: --pipelines-n must be between 1 and 12 (got {num_pipelines})')
+    else:
+        calc_and_print_pipelines(month_data, num_pipelines, loss_threshold, gain_fraction, verbose=verbose)
 
 if __name__ == "__main__":
     main()
