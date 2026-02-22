@@ -197,19 +197,42 @@ def _partial_gain_multiplier(price_gain: float, loss_threshold: float, gain_frac
 
 
 def _read_annual_raw(filename: str) -> list:
-    """Read annual CSV (year, pricegain, yield). Returns list of dicts with year, pricegain, yield.
-    Only used internally by read_monthly_data.
+    """Read annual CSV. Supports two formats:
+    1. With headers: year,pricegain,yield
+    2. Headerless: date,yield (e.g. 2023-12-31,0.0150)
+    Returns list of dicts with year, yield, and optionally pricegain,
+    sorted by year ascending.
     """
     data = []
     with open(filename, mode='r') as file:
-        csvfile = csv.DictReader(file)
-        for line_dict in csvfile:
-            line_dict = dict(line_dict)
-            data.append({
-                'year': int(line_dict['year']),
-                'pricegain': float(line_dict['pricegain']) + 1,
-                'yield': float(line_dict['yield'])
-            })
+        first_line = file.readline().strip()
+        file.seek(0)
+
+        if 'year' in first_line.lower():
+            csvfile = csv.DictReader(file)
+            for line_dict in csvfile:
+                line_dict = dict(line_dict)
+                data.append({
+                    'year': int(line_dict['year']),
+                    'pricegain': float(line_dict['pricegain']) + 1,
+                    'yield': float(line_dict['yield'])
+                })
+        else:
+            reader = csv.reader(file)
+            for row in reader:
+                if len(row) < 2:
+                    continue
+                date_str = row[0].strip()
+                yield_val = row[1].strip()
+                try:
+                    dt = datetime.strptime(date_str, '%Y-%m-%d')
+                    data.append({
+                        'year': dt.year,
+                        'yield': float(yield_val)
+                    })
+                except (ValueError, TypeError):
+                    continue
+    data.sort(key=lambda x: x['year'])
     return data
 
 
@@ -269,6 +292,15 @@ def read_monthly_data(filename: str, annual_yield_file: str = '', tax_rate: floa
 
     if annual_yield_file.strip():
         raw_annual = _read_annual_raw(annual_yield_file.strip())
+        has_pricegain = raw_annual and 'pricegain' in raw_annual[0]
+        if not has_pricegain:
+            year_gains = {}
+            for m in data:
+                y = m['date'].year
+                year_gains.setdefault(y, 1.0)
+                year_gains[y] *= m['gain']
+            for entry in raw_annual:
+                entry['pricegain'] = year_gains.get(entry['year'], 1.0)
         year_index = 0
         for i in range(len(data)):
             month = data[i]['date'].month
@@ -657,25 +689,39 @@ def filter_daily_by_date_range(daily_data: list, from_date: datetime, to_date: d
 
 
 def _apply_gain_list_to_ohlc(ohlc: list, gain_list: list, freq: str) -> list:
-    """Scale price OHLC to total-return using gain list (year -> gain)."""
+    """Scale price OHLC to total-return using gain list (year -> gain).
+    Preserves actual bar-to-bar price variation; distributes the dividend
+    adjustment (total_return / price_return) evenly within each year."""
     if not ohlc or not gain_list:
         return ohlc
-    year_to_gain = {g['year']: g['gain'] for g in gain_list}
+    year_to_total_gain = {g['year']: g['gain'] for g in gain_list}
+
+    year_bars = defaultdict(list)
+    for bar in ohlc:
+        year_bars[bar['date'].year].append(bar)
+
+    prev_year_end_close = None
+    year_div_factor = {}
+    for y in sorted(year_bars.keys()):
+        bars = year_bars[y]
+        last_close = bars[-1]['close']
+        if prev_year_end_close is not None and prev_year_end_close > 0:
+            price_return = last_close / prev_year_end_close
+            total_gain = year_to_total_gain.get(y)
+            if total_gain is not None and price_return > 0:
+                n = len(bars)
+                year_div_factor[y] = (total_gain / price_return) ** (1 / n)
+        prev_year_end_close = last_close
+
     base = ohlc[0]['close']
     cum_tr = [base]
     for i in range(1, len(ohlc)):
         bar = ohlc[i]
         prev_bar = ohlc[i - 1]
-        year = bar['date'].year
-        g = year_to_gain.get(year)
-        if g is not None:
-            if freq == 'annual':
-                tr_gain = g
-            else:
-                tr_gain = g ** (1 / 12) if freq == 'monthly' else g ** (1 / 4)
-        else:
-            tr_gain = bar['close'] / prev_bar['close']
-        cum_tr.append(cum_tr[-1] * tr_gain)
+        price_gain = bar['close'] / prev_bar['close'] if prev_bar['close'] > 0 else 1.0
+        div_factor = year_div_factor.get(bar['date'].year, 1.0)
+        cum_tr.append(cum_tr[-1] * price_gain * div_factor)
+
     result = []
     for i, bar in enumerate(ohlc):
         o, h, l, c = bar['open'], bar['high'], bar['low'], bar['close']
@@ -765,14 +811,22 @@ def plot_price_candlestick(daily_file: str, from_date: datetime, to_date: dateti
             y = bar['date'].year
             if y not in year_to_first_idx:
                 year_to_first_idx[y] = i
-        indices = sorted(year_to_first_idx.values())
-        ax.set_xticks(indices)
-        ax.set_xticklabels([ohlc[i]['date'].strftime('%Y') for i in indices])
+        all_years = sorted(year_to_first_idx.keys())
+        min_gap = max(len(ohlc) // 30, 2)
+        ticks, labels = [], []
+        for y in all_years:
+            idx = year_to_first_idx[y]
+            if not ticks or idx - ticks[-1] >= min_gap:
+                ticks.append(idx)
+                labels.append(str(y))
+        ax.set_xticks(ticks)
+        ax.set_xticklabels(labels)
+        ax.set_xlim(-0.5, len(ohlc) - 0.5)
 
     if ymin is not None and ymax is not None:
         ax.set_ylim(ymin, ymax)
     else:
-        ax.autoscale()
+        ax.autoscale(axis='y')
     plt.tight_layout()
     plt.show()
 
