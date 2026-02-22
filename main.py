@@ -301,17 +301,14 @@ def read_monthly_data(filename: str, annual_yield_file: str = '', tax_rate: floa
                 year_gains[y] *= m['gain']
             for entry in raw_annual:
                 entry['pricegain'] = year_gains.get(entry['year'], 1.0)
-        year_index = 0
+        year_map = {entry['year']: entry for entry in raw_annual}
         for i in range(len(data)):
-            month = data[i]['date'].month
             year = data[i]['date'].year
-            if year_index < len(raw_annual) and raw_annual[year_index]['year'] == year:
-                ag = raw_annual[year_index]['pricegain']
-                ay = raw_annual[year_index]['yield']
+            if year in year_map:
+                ag = year_map[year]['pricegain']
+                ay = year_map[year]['yield']
                 ratio = (ag + ay * (1 - tax_rate)) / ag
                 data[i]['gain'] *= ratio ** (1 / 12)
-            if month == 12:
-                year_index += 1
 
     return data
 
