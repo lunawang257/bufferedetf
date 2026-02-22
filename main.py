@@ -489,6 +489,12 @@ def calc_pipelines(month_data: list, num_pipelines: int, loss_threshold: float, 
             verbose_rows.append((year_label, year_gain_pct, max_drawdown * 100))
             prev_year_end_value = port_value
 
+    # Include active (unclosed) pipelines in slot_returns so per-slot stats
+    # account for the same returns as the overall portfolio calculation.
+    for (init, start_idx, cum, slot) in pipelines:
+        multiplier = _partial_gain_multiplier(cum, loss_threshold, gain_fraction)
+        slot_returns[slot].append(multiplier)
+
     end_money = cash
     for (init, start_idx, cum, _) in pipelines:
         end_money += init * _partial_gain_multiplier(cum, loss_threshold, gain_fraction)
@@ -521,7 +527,7 @@ def calc_pipelines(month_data: list, num_pipelines: int, loss_threshold: float, 
             if dd > slot_max_dd:
                 slot_max_dd = dd
         n = len(returns)
-        slot_ann = (pow(compounded, 1 / n) - 1) if n > 0 else 0.0
+        slot_ann = (pow(compounded, 1 / (n - 1)) - 1) if n > 1 else 0.0
         slot_infos.append({
             'month': deployment_months[s],
             'annualized': slot_ann,
@@ -809,6 +815,11 @@ def plot_price_candlestick(daily_file: str, from_date: datetime, to_date: dateti
             if y not in year_to_first_idx:
                 year_to_first_idx[y] = i
         all_years = sorted(year_to_first_idx.keys())
+
+        for y in all_years:
+            idx = year_to_first_idx[y]
+            ax.axvline(x=idx - 0.5, color='grey', linewidth=0.5, linestyle='-', alpha=0.4)
+
         min_gap = max(len(ohlc) // 30, 2)
         ticks, labels = [], []
         for y in all_years:
